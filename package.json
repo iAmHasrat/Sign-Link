@@ -1,0 +1,14 @@
+{
+  "name": "sign-link",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-ready Sign Link full-stack communication platform.",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:ai": "cd ai-service && uvicorn main:app --reload --port 8000",
+    "build": "npm run build --prefix frontend",
+    "start": "npm start --prefix backend"
+  }
+}
