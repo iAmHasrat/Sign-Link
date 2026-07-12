@@ -1,4 +1,3 @@
-from tkinter.filedialog import Open
 import torch, pickle
 import gzip, os
 from glob import glob
@@ -101,5 +100,10 @@ class SignLanguageDataset(torch.utils.data.Dataset):
 #     # def __getitem__(self, idx):
 
 def build_dataset(dataset_cfg, split):
+    # iSign: pose-based gloss-free SLT dataset.
+    # All other datasets fall through to the original SignLanguageDataset.
+    if dataset_cfg.get('dataset_name') == 'isign':
+        from dataset.ISignDataset import ISignDataset
+        return ISignDataset(dataset_cfg, split)
     dataset = SignLanguageDataset(dataset_cfg, split)
     return dataset
