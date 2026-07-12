@@ -43,6 +43,8 @@ def evaluation(model, val_dataloader, cfg,
         generate_cfg={}, save_dir=None,
         do_translation=True, do_recognition=True):  
     logger = get_logger()
+    if cfg['data'].get('dataset_name', '').lower() == 'isign':
+        do_recognition = False
     logger.info(generate_cfg)
     print()
     if os.environ.get('enable_pbar', '1')=='1':
