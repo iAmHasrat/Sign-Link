@@ -236,3 +236,43 @@ def freeze_params(module: nn.Module):
     """
     for _, p in module.named_parameters():
         p.requires_grad = False
+
+def adjust_progressive_training(model, epoch_no, logger):
+    # Only apply progressive training for S2T task
+    if hasattr(model, 'translation_network') and model.task == 'S2T':
+        # Default target epochs: Stage 1 = 0-9, Stage 2 = 10-19, Stage 3 = 20+
+        if epoch_no < 10:
+            # Stage 1: Freeze all mBART parameters, train VisualHead + Mapper
+            logger.info("Progressive Training Stage 1: Freezing all mBART parameters.")
+            # Freeze translation network
+            for param in model.translation_network.model.parameters():
+                param.requires_grad = False
+            # Ensure recognition network (VisualHead) and vl_mapper are trainable
+            for param in model.recognition_network.parameters():
+                param.requires_grad = True
+            for param in model.vl_mapper.parameters():
+                param.requires_grad = True
+        elif epoch_no < 20:
+            # Stage 2: Partially unfreeze (last 2 decoder layers of mBART)
+            logger.info("Progressive Training Stage 2: Unfreezing last 2 decoder layers of mBART.")
+            # Freeze all translation network parameters first
+            for param in model.translation_network.model.parameters():
+                param.requires_grad = False
+            # Unfreeze last 2 layers of decoder
+            for layer in model.translation_network.model.model.decoder.layers[-2:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+            # Also unfreeze lm_head (output projection) and shared embeds if they are updated
+            if hasattr(model.translation_network.model, 'lm_head'):
+                for param in model.translation_network.model.lm_head.parameters():
+                    param.requires_grad = True
+            # Ensure recognition network and vl_mapper remain trainable
+            for param in model.recognition_network.parameters():
+                param.requires_grad = True
+            for param in model.vl_mapper.parameters():
+                param.requires_grad = True
+        else:
+            # Stage 3: Fully unfreeze
+            logger.info("Progressive Training Stage 3: Fully unfreezing all parameters.")
+            for param in model.parameters():
+                param.requires_grad = True

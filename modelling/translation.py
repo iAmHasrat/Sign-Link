@@ -209,7 +209,7 @@ class TranslationNetwork(torch.nn.Module):
             inputs_embeds=inputs_embeds, attention_mask=attention_mask, #same with forward 
             decoder_input_ids=decoder_input_ids,
             num_beams=num_beams, length_penalty=length_penalty, max_length=max_length, 
-            return_dict_in_generate=True)
+            return_dict_in_generate=True, **kwargs)
         output_dict['decoded_sequences'] = self.text_tokenizer.batch_decode(output_dict['sequences'])
         return output_dict
 

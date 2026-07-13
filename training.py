@@ -6,7 +6,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from modelling.model import build_model
-from utils.optimizer import build_optimizer, build_scheduler
+from utils.optimizer import build_optimizer, build_scheduler, build_gradient_clipper
 from utils.progressbar import ProgressBar
 warnings.filterwarnings("ignore")
 from utils.misc import (
@@ -15,7 +15,8 @@ from utils.misc import (
     make_logger, make_writer, make_wandb,
     set_seed,
     is_main_process, init_DDP,
-    synchronize 
+    synchronize,
+    adjust_progressive_training
 )
 from dataset.Dataloader import build_dataloader
 from prediction import evaluation
@@ -128,6 +129,7 @@ if __name__ == "__main__":
 
     optimizer = build_optimizer(config=cfg['training']['optimization'], model=model.module) 
     scheduler, scheduler_type = build_scheduler(config=cfg['training']['optimization'], optimizer=optimizer)
+    clip_grad_fun = build_gradient_clipper(cfg['training']['optimization'])
     assert scheduler_type=='epoch'
     start_epoch, total_epoch, global_step = 0, cfg['training']['total_epoch'], 0
     val_unit, val_freq = cfg['training']['validation']['unit'], cfg['training']['validation']['freq']
@@ -164,6 +166,7 @@ if __name__ == "__main__":
     for epoch_no in range(start_epoch, total_epoch):
         train_sampler.set_epoch(epoch_no)
         logger.info('Epoch {}, Training examples {}'.format(epoch_no, len(train_dataloader.dataset)))
+        adjust_progressive_training(model.module, epoch_no, logger)
         scheduler.step()
         for step, batch in enumerate(train_dataloader):
             model.module.set_train()
@@ -171,6 +174,8 @@ if __name__ == "__main__":
 
             with torch.autograd.set_detect_anomaly(True):           
                 output['total_loss'].backward()
+            if clip_grad_fun is not None:
+                clip_grad_fun(model.parameters())
             optimizer.step()
             model.zero_grad()
 

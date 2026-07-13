@@ -53,9 +53,11 @@ testing:
     recognition:
       beam_size: 1
     translation:
-      length_penalty: 1
+      length_penalty: 1.0
       max_length: 100
       num_beams: 5
+      repetition_penalty: 1.2
+      no_repeat_ngram_size: 3
 
 # ---------------------------------------------------------------------------
 # Training
@@ -83,6 +85,7 @@ training:
       translation: 1.0e-05   # mBART (fine-tuning the pretrained model)
     scheduler: cosineannealing
     t_max: 40
+    clip_grad_norm: 1.0
 
   validation:
     unit: step
@@ -91,9 +94,11 @@ training:
       recognition:
         beam_size: 1
       translation:
-        length_penalty: 1
+        length_penalty: 1.0
         max_length: 100
         num_beams: 5
+        repetition_penalty: 1.2
+        no_repeat_ngram_size: 3
 
 # ---------------------------------------------------------------------------
 # Model

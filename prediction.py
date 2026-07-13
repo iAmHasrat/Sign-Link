@@ -34,7 +34,7 @@ from utils.misc import (
 )
 from dataset.Dataloader import build_dataloader
 from utils.progressbar import ProgressBar
-from utils.metrics import bleu, rouge, wer_list
+from utils.metrics import bleu, rouge, chrf, meteor, wer_list
 from utils.phoenix_cleanup import clean_phoenix_2014_trans, clean_phoenix_2014
 
 def evaluation(model, val_dataloader, cfg, 
@@ -160,16 +160,26 @@ def evaluation(model, val_dataloader, cfg,
         txt_hyp = [results[n]['txt_hyp'] for n in results]
         bleu_dict = bleu(references=txt_ref, hypotheses=txt_hyp, level=cfg['data']['level'])
         rouge_score = rouge(references=txt_ref, hypotheses=txt_hyp, level=cfg['data']['level'])
+        chrf_score = chrf(references=txt_ref, hypotheses=txt_hyp)
+        meteor_score_val = meteor(references=txt_ref, hypotheses=txt_hyp)
         for k,v in bleu_dict.items():
             logger.info('{} {:.2f}'.format(k,v))
         logger.info('ROUGE: {:.2f}'.format(rouge_score))
+        logger.info('ChrF: {:.2f}'.format(chrf_score))
+        logger.info('METEOR: {:.2f}'.format(meteor_score_val))
         evaluation_results['rouge'], evaluation_results['bleu'] = rouge_score, bleu_dict
+        evaluation_results['chrf'] = chrf_score
+        evaluation_results['meteor'] = meteor_score_val
         if tb_writer:
             tb_writer.add_scalar('eval/BLEU4', bleu_dict['bleu4'], epoch if epoch!=None else global_step)
             tb_writer.add_scalar('eval/ROUGE', rouge_score, epoch if epoch!=None else global_step)
+            tb_writer.add_scalar('eval/ChrF', chrf_score, epoch if epoch!=None else global_step)
+            tb_writer.add_scalar('eval/METEOR', meteor_score_val, epoch if epoch!=None else global_step)
         if wandb_run!=None:
             wandb.log({'eval/BLEU4': bleu_dict['bleu4']})
             wandb.log({'eval/ROUGE': rouge_score})
+            wandb.log({'eval/ChrF': chrf_score})
+            wandb.log({'eval/METEOR': meteor_score_val})
     #save
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)

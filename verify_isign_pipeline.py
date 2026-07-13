@@ -81,37 +81,55 @@ assert batch_feat.shape[2] == INPUT_DIM
 assert sgn_mask.shape == batch_feat.shape[:2]
 print("    ✓ collate_fn padding OK")
 
-# ─── 3. VisualHead (recognition feature path) ──────────────────────────────────
-print("\n[3] Testing VisualHead (feature mode, input_streams=['rgb'])...")
-from modelling.Visualhead import VisualHead
+# ─── 3. Recognition Network (Feature Mode) ────────────────────────────────────
+print("\n[3] Testing RecognitionNetwork (feature mode, input_streams=['rgb'])...")
+from modelling.recognition import RecognitionNetwork
+import pickle
 
-# Minimal GlossTokenizer stub (avoids needing the pickle file here)
-class _DummyGlossTokenizer:
-    silence_id = 0
-    pad_id = 2
-    def __len__(self): return 3
-    def __call__(self, batch_gls_seq):
-        gls_lengths = torch.zeros(len(batch_gls_seq), dtype=torch.long)
-        gloss_labels = torch.zeros(len(batch_gls_seq), 1, dtype=torch.long)
-        return {'gls_lengths': gls_lengths, 'gloss_labels': gloss_labels}
+# Create dummy gloss2ids file if not present
+dummy_gloss_path = "data/isign/gloss2ids.pkl"
+os.makedirs(os.path.dirname(dummy_gloss_path), exist_ok=True)
+if not os.path.exists(dummy_gloss_path):
+    with open(dummy_gloss_path, "wb") as f:
+        pickle.dump({"<unk>": 0, "<pad>": 1, "<s>": 2, "</s>": 3, "<si>": 0}, f)
 
-vh = VisualHead(
-    cls_num=3,
-    input_size=INPUT_DIM,
-    hidden_size=HIDDEN_SIZE,
-    ff_size=2048,
-    pe=True,
-    ff_kernelsize=[3, 3],
+rec_net = RecognitionNetwork(
+    cfg={
+        "GlossTokenizer": {"gloss2id_file": dummy_gloss_path},
+        "input_streams": ["rgb"],
+        "fuse_method": "empty",
+        "visual_head": {
+            "input_size": INPUT_DIM,
+            "hidden_size": HIDDEN_SIZE,
+            "ff_size": 2048,
+            "ff_kernelsize": [3, 3],
+            "pe": True,
+        }
+    },
+    input_type="feature",
+    transform_cfg={},
+    input_streams=["rgb"]
 )
-vh.eval()
+rec_net.eval()
 
 with torch.no_grad():
-    vh_out = vh(x=batch_feat, mask=sgn_mask, valid_len_in=sgn_lengths)
+    rec_out = rec_net(
+        is_train=False,
+        gloss_labels=torch.zeros((BATCH_SIZE, 1), dtype=torch.long),
+        gls_lengths=torch.ones((BATCH_SIZE,), dtype=torch.long),
+        head_rgb_input=batch_feat,
+        sgn_mask=sgn_mask,
+        sgn_lengths=sgn_lengths,
+    )
 
-print(f"    gloss_feature shape : {vh_out['gloss_feature'].shape}")  # (B, T_max, 512)
-print(f"    gloss_logits shape  : {vh_out['gloss_logits'].shape}")   # (B, T_max, 3)
-assert vh_out['gloss_feature'].shape == (BATCH_SIZE, batch_feat.shape[1], HIDDEN_SIZE)
-print("    ✓ VisualHead forward OK")
+print(f"    gloss_feature shape : {rec_out['gloss_feature'].shape}")  # (B, T_max, 512)
+print(f"    gloss_logits shape  : {rec_out['gloss_logits'].shape}")   # (B, T_max, 4)
+assert rec_out['gloss_feature'].shape == (BATCH_SIZE, batch_feat.shape[1], HIDDEN_SIZE)
+print("    ✓ RecognitionNetwork forward OK")
+
+# Cache output for VLMapper test
+vh_out = rec_out
+
 
 # ─── 4. VLMapper ───────────────────────────────────────────────────────────────
 print("\n[4] Testing VLMapper...")

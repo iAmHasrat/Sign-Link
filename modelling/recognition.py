@@ -80,10 +80,11 @@ class RecognitionNetwork(torch.nn.Module):
 
         if 'visual_head' in cfg:
             if 'rgb' in input_streams:
-                if cfg['pyramid']['rgb'] in ['fused_head', 'fused_multi_head']:
-                    cfg['visual_head']['input_size'] = 1568  #832+480+192+64
-                else:
-                    cfg['visual_head']['input_size'] = 832
+                if self.input_type == 'video':
+                    if cfg['pyramid']['rgb'] in ['fused_head', 'fused_multi_head']:
+                        cfg['visual_head']['input_size'] = 1568  #832+480+192+64
+                    else:
+                        cfg['visual_head']['input_size'] = 832
                 
                 if cfg['pyramid']['rgb'] == 'shared_head':
                     cfg['visual_head']['input_size'] = None
@@ -112,10 +113,11 @@ class RecognitionNetwork(torch.nn.Module):
                 self.visual_head = None
             
             if 'keypoint' in input_streams:
-                if cfg['pyramid']['pose'] in ['fused_head', 'fused_multi_head']:
-                    cfg['visual_head']['input_size'] = 1568 
-                else:
-                    cfg['visual_head']['input_size'] = 832
+                if self.input_type == 'video':
+                    if cfg['pyramid']['pose'] in ['fused_head', 'fused_multi_head']:
+                        cfg['visual_head']['input_size'] = 1568 
+                    else:
+                        cfg['visual_head']['input_size'] = 832
 
                 if cfg['pyramid']['pose'] == 'shared_head':
                     cfg['visual_head']['input_size'] = None

@@ -8,7 +8,8 @@ class VisualHead(torch.nn.Module):
         cls_num, input_size=832, hidden_size=512, ff_size=2048, pe=True,
         ff_kernelsize=3, pretrained_ckpt=None, is_empty=False, frozen=False, 
         plus_conv_cfg={},
-        ssl_projection_cfg={}):
+        ssl_projection_cfg={},
+        num_transformer_layers=2):
         super().__init__()
         self.is_empty = is_empty
         self.plus_conv_cfg = plus_conv_cfg
@@ -29,6 +30,17 @@ class VisualHead(torch.nn.Module):
                 self.pe = PositionalEncoding(self.hidden_size)
             else:
                 self.pe = torch.nn.Identity()
+
+            # Spatial-temporal Transformer layers
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=self.hidden_size, 
+                nhead=8, 
+                dim_feedforward=ff_size, 
+                dropout=0.1, 
+                activation='gelu',
+                batch_first=True
+            )
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_transformer_layers)
 
             self.feedforward = PositionwiseFeedForward(input_size=self.hidden_size,
                 ff_size=ff_size,
@@ -52,7 +64,7 @@ class VisualHead(torch.nn.Module):
             self.gloss_output_layer = torch.nn.Linear(self.hidden_size, cls_num)
 
             if self.frozen:
-                self.frozen_layers = [self.fc1, self.bn1, self.relu1,  self.pe, self.dropout1, self.feedforward, self.layer_norm]
+                self.frozen_layers = [self.fc1, self.bn1, self.relu1,  self.pe, self.dropout1, self.transformer_encoder, self.feedforward, self.layer_norm]
                 for layer in self.frozen_layers:
                     for name, param in layer.named_parameters():
                         param.requires_grad = False
@@ -83,6 +95,10 @@ class VisualHead(torch.nn.Module):
                 x = self.pe(x)
                 x = self.dropout1(x)
 
+                #transformer encoder
+                src_key_padding_mask = (mask == 0) if mask is not None else None
+                x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
                 #feedforward
                 x = self.feedforward(x)
                 x = self.layer_norm(x)
@@ -96,6 +112,9 @@ class VisualHead(torch.nn.Module):
                         layer.eval()
                         if ii==1:
                             x = layer(x, mask)
+                        elif ii==5: # self.transformer_encoder
+                            src_key_padding_mask = (mask == 0) if mask is not None else None
+                            x = layer(x, src_key_padding_mask=src_key_padding_mask)
                         else:
                             x = layer(x)
                 x = x.transpose(1,2)

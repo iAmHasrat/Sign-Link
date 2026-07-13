@@ -13,7 +13,9 @@ class VLMapper(torch.nn.Module):
             self.hidden_size = out_features
             self.mapping = torch.nn.Sequential(
                 torch.nn.Linear(in_features=in_features, out_features=self.hidden_size),
-                torch.nn.ReLU(),
+                torch.nn.LayerNorm(self.hidden_size),
+                torch.nn.GELU(),
+                torch.nn.Dropout(p=0.1),
                 torch.nn.Linear(in_features=self.hidden_size, out_features=out_features)
             )
         elif self.type == 'embedding':

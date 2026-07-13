@@ -105,16 +105,49 @@ class ISignDataset(torch.utils.data.Dataset):
         self.annotations = df[["uid", "text"]]
 
     @staticmethod
-    def _read_pose(path: str) -> torch.Tensor:
+    def _normalize_landmarks(data: np.ndarray) -> np.ndarray:
         """
-        Read a .pose file and return a float32 Tensor of shape (T, 2304).
+        Normalize MediaPipe Holistic landmark coordinates:
+          1. Hips midpoint as origin for body and face.
+          2. Left/right wrist as origin for left/right hand.
+          3. Scale normalization by shoulder-to-shoulder width.
+        """
+        T, N, C = data.shape
+        normalized = np.copy(data)
+        
+        # 1. Hips midpoint centering (origin for pose and face)
+        # Left hip: 23, Right hip: 24
+        mid_hips = (data[:, 23, :C] + data[:, 24, :C]) / 2.0  # (T, 3)
+        pose_face_end = min(501, N)
+        normalized[:, :pose_face_end, :C] -= mid_hips[:, np.newaxis, :]
+        
+        # 2. Wrist-relative hand coordinates
+        # Left hand wrist: index 501. Left hand: 501 to 521
+        if N > 501:
+            left_hand_end = min(522, N)
+            left_wrist = data[:, 501, :C]  # (T, 3)
+            normalized[:, 501:left_hand_end, :C] -= left_wrist[:, np.newaxis, :]
+            
+        # Right hand wrist: index 522. Right hand: 522 to 542
+        if N > 522:
+            right_hand_end = min(543, N)
+            right_wrist = data[:, 522, :C]  # (T, 3)
+            normalized[:, 522:right_hand_end, :C] -= right_wrist[:, np.newaxis, :]
+            
+        # 3. Scale normalization by shoulder-to-shoulder width
+        # Left shoulder: 11, Right shoulder: 12
+        shoulder_dist = np.linalg.norm(data[:, 11, :C] - data[:, 12, :C], axis=-1, keepdims=True)  # (T, 1)
+        shoulder_dist = np.where(shoulder_dist == 0.0, 1.0, shoulder_dist)
+        
+        # Apply scaling to all coordinates
+        normalized[:, :, :C] /= shoulder_dist[:, np.newaxis, :]
+        
+        return normalized
 
-        Steps:
-          1.  Pose.read()  →  data (T,1,576,3) + conf (T,1,576)
-          2.  Squeeze person dim  →  (T,576,3) and (T,576)
-          3.  Expand conf  →  (T,576,1)
-          4.  Concat  →  (T,576,4)
-          5.  Flatten  →  (T,2304)
+    def _read_pose(self, path: str) -> torch.Tensor:
+        """
+        Read a .pose file, apply normalization and split-dependent data augmentations,
+        and return a float32 Tensor of shape (T, 2304).
         """
         with open(path, "rb") as fh:
             pose = Pose.read(fh.read())
@@ -126,6 +159,52 @@ class ISignDataset(torch.utils.data.Dataset):
         # Squeeze the person dimension (always 1 for iSign)
         data = data[:, 0, :, :]   # (T, 576, 3)
         conf = conf[:, 0, :]      # (T, 576)
+
+        # Apply normalization
+        data = self._normalize_landmarks(data)
+
+        # Apply split-dependent train-time augmentations
+        if self.split == "train":
+            T, N, C = data.shape
+            
+            # A. Temporal Stretching/Compression (Frame Resampling)
+            if np.random.rand() < 0.5:
+                scale = np.random.uniform(0.8, 1.2)
+                new_T = int(round(T * scale))
+                new_T = max(8, min(new_T, self.MAX_SEQ_LEN))
+                indices = np.linspace(0, T - 1, new_T).astype(np.int32)
+                data = data[indices]
+                conf = conf[indices]
+                T = new_T
+
+            # B. Landmark Dropout (Masking left/right hands randomly)
+            if np.random.rand() < 0.1:  # 10% chance to drop left hand
+                if N > 501:
+                    left_hand_end = min(522, N)
+                    data[:, 501:left_hand_end, :] = 0.0
+                    conf[:, 501:left_hand_end] = 0.0
+            if np.random.rand() < 0.1:  # 10% chance to drop right hand
+                if N > 522:
+                    right_hand_end = min(543, N)
+                    data[:, 522:right_hand_end, :] = 0.0
+                    conf[:, 522:right_hand_end] = 0.0
+
+            # C. Random Rotation (around Z axis)
+            if np.random.rand() < 0.5:
+                angle = np.random.uniform(-0.1, 0.1)  # in radians
+                cos_a, sin_a = np.cos(angle), np.sin(angle)
+                rot_matrix = np.array([[cos_a, -sin_a, 0], [sin_a, cos_a, 0], [0, 0, 1]], dtype=np.float32)
+                data = np.dot(data, rot_matrix)
+
+            # D. Random Scaling
+            if np.random.rand() < 0.5:
+                scale_factor = np.random.uniform(0.95, 1.05)
+                data *= scale_factor
+
+            # E. Gaussian Noise
+            if np.random.rand() < 0.5:
+                noise = np.random.normal(0.0, 0.01, size=data.shape).astype(np.float32)
+                data += noise
 
         # Append confidence as a 4th channel per landmark
         conf = conf[:, :, np.newaxis]               # (T, 576, 1)

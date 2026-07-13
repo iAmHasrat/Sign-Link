@@ -11,6 +11,33 @@ WER_COST_INS = 3
 WER_COST_SUB = 4
 
 
+def meteor(references, hypotheses):
+    """
+    METEOR score from nltk.translate.meteor_score
+    :param hypotheses: list of hypotheses (strings)
+    :param references: list of references (strings)
+    :return:
+    """
+    try:
+        import nltk
+        from nltk.translate.meteor_score import meteor_score
+        try:
+            nltk.data.find('corpora/wordnet')
+        except LookupError:
+            nltk.download('wordnet', quiet=True)
+            nltk.download('omw-1.4', quiet=True)
+        
+        scores = []
+        for r, h in zip(references, hypotheses):
+            r_tokens = r.split()
+            h_tokens = h.split()
+            scores.append(meteor_score([r_tokens], h_tokens))
+        return np.mean(scores) * 100
+    except Exception as e:
+        print("Error computing METEOR:", e)
+        return 0.0
+
+
 def chrf(references, hypotheses):
     """
     Character F-score from sacrebleu
