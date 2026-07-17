@@ -87,6 +87,14 @@ def make_model_dir(model_dir: str, overwrite: bool = False) -> str:
     return model_dir
 
 def get_logger():
+    global logger
+    if 'logger' not in globals():
+        logger = logging.getLogger("slt")
+        if not logger.handlers:
+            logger.setLevel(logging.INFO)
+            sh = logging.StreamHandler()
+            sh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(sh)
     return logger
     
 def make_logger(model_dir: str, log_file: str = "train.log") -> Logger:

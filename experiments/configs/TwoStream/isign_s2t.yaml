@@ -68,20 +68,21 @@ training:
   num_workers: 4
 
   model_dir: experiments/outputs/TwoStream/isign_s2t
-  overwrite: true
+  overwrite: false
   random_seed: 42
   shuffle: true
   total_epoch: 40
+  from_ckpt: true
 
   optimization:
-    optimizer: Adam
+    optimizer: AdamW
     betas:
       - 0.9
       - 0.998
     weight_decay: 0.001
     learning_rate:
-      default: 0.0003        # VisualHead + recognition output layer
-      mapper: 0.001          # VLMapper (projection, trained from scratch)
+      default: 1.0e-04        # VisualHead + recognition output layer
+      mapper: 1.0e-04          # VLMapper (projection, trained from scratch)
       translation: 1.0e-05   # mBART (fine-tuning the pretrained model)
     scheduler: cosineannealing
     t_max: 40
@@ -96,7 +97,7 @@ training:
       translation:
         length_penalty: 1.0
         max_length: 100
-        num_beams: 5
+        num_beams: 3
         repetition_penalty: 1.2
         no_repeat_ngram_size: 3
 

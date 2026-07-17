@@ -205,6 +205,8 @@ class TranslationNetwork(torch.nn.Module):
         batch_size = attention_mask.shape[0]
         decoder_input_ids = torch.ones([batch_size,1],dtype=torch.long, device=attention_mask.device)*self.text_tokenizer.sos_index
         assert inputs_embeds!=None and attention_mask!=None
+        kwargs.pop('decoder_input_ids', None)
+        kwargs.pop('labels', None)
         output_dict = self.model.generate(
             inputs_embeds=inputs_embeds, attention_mask=attention_mask, #same with forward 
             decoder_input_ids=decoder_input_ids,

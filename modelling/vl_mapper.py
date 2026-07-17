@@ -1,6 +1,22 @@
 import torch, os
 from utils.misc import freeze_params, get_logger
 
+class ResidualBlock(torch.nn.Module):
+    def __init__(self, features):
+        super().__init__()
+        self.block = torch.nn.Sequential(
+            torch.nn.Linear(features, features),
+            torch.nn.LayerNorm(features),
+            torch.nn.GELU(),
+            torch.nn.Dropout(p=0.1),
+            torch.nn.Linear(features, features),
+            torch.nn.LayerNorm(features)
+        )
+        self.activation = torch.nn.GELU()
+
+    def forward(self, x):
+        return self.activation(x + self.block(x))
+
 class VLMapper(torch.nn.Module):
     def __init__(self, cfg, in_features, out_features,
         gloss_id2str=None,
@@ -11,12 +27,13 @@ class VLMapper(torch.nn.Module):
         self.type = cfg.get('type','projection')
         if self.type == 'projection':
             self.hidden_size = out_features
+            self.input_projection = torch.nn.Linear(in_features=in_features, out_features=self.hidden_size)
+            self.res_block1 = ResidualBlock(self.hidden_size)
+            self.res_block2 = ResidualBlock(self.hidden_size)
             self.mapping = torch.nn.Sequential(
-                torch.nn.Linear(in_features=in_features, out_features=self.hidden_size),
-                torch.nn.LayerNorm(self.hidden_size),
-                torch.nn.GELU(),
-                torch.nn.Dropout(p=0.1),
-                torch.nn.Linear(in_features=self.hidden_size, out_features=out_features)
+                self.input_projection,
+                self.res_block1,
+                self.res_block2
             )
         elif self.type == 'embedding':
             self.mapping = torch.nn.Linear(

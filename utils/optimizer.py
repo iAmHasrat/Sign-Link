@@ -53,14 +53,14 @@ def build_optimizer(config: dict, model) -> Optimizer:
     weight_decay = config.get("weight_decay", 0)
     eps = config.get("eps", 1.0e-8)
     parameters = []
-    base_lr = config['learning_rate'].pop('default')
+    base_lr = config['learning_rate'].get('default', 1e-05)
     for n, p in model.named_children():
         lr_ = base_lr
         for m, lr in config['learning_rate'].items():
             if m in n:
                 lr_ = lr
         logger.info('learning rate {}={}'.format(n, lr_))
-        parameters.append({'params':p.parameters(), 'lr':lr_})
+        parameters.append({'params':p.parameters(), 'lr':lr_, 'name':n})
 
     betas = config.get("betas", (0.9, 0.999))
     amsgrad = config.get("amsgrad", False)
@@ -75,7 +75,7 @@ def build_optimizer(config: dict, model) -> Optimizer:
             amsgrad=amsgrad,
         )
     elif optimizer_name == "adamw":
-        return torch.optim.Adam(
+        return torch.optim.AdamW(
             params=parameters,
             lr=base_lr,
             betas=betas,

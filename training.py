@@ -42,8 +42,17 @@ def evaluate_and_save(model, optimizer, scheduler, val_dataloader, cfg,
         tb_writer, wandb_run=None,
         epoch=None, global_step=None, generate_cfg={}):
     tag = 'epoch_{:02d}'.format(epoch) if epoch!=None else 'step_{}'.format(global_step)
-    #save
     global best_score, ckpt_queue
+
+    # Delete old checkpoint to free up space BEFORE saving the new one
+    if ckpt_queue.full():
+        to_delete = ckpt_queue.get()
+        try:
+            os.remove(to_delete)
+            logger.info('Deleted old checkpoint to free space: ' + to_delete)
+        except FileNotFoundError:
+            pass
+
     eval_results = evaluation(
         model=model, val_dataloader=val_dataloader, cfg=cfg, 
         tb_writer=tb_writer, wandb_run=wandb_run,
@@ -59,22 +68,24 @@ def evaluate_and_save(model, optimizer, scheduler, val_dataloader, cfg,
         score = eval_results['wer']
         best_score = min(best_score, score)
     logger.info('best_score={:.2f}'.format(best_score))
+    
     ckpt_file = save_model(model=model, optimizer=optimizer, scheduler=scheduler,
         output_file=os.path.join(cfg['training']['model_dir'],'ckpts',tag+'.ckpt'),
         epoch=epoch, global_step=global_step,
         current_score=score)
 
     if best_score==score:
-        os.system('cp {} {}'.format(ckpt_file, os.path.join(cfg['training']['model_dir'],'ckpts','best.ckpt')))
-    if ckpt_queue.full():
-        to_delete = ckpt_queue.get()
+        best_link = os.path.join(cfg['training']['model_dir'],'ckpts','best.ckpt')
+        if os.path.lexists(best_link):
+            os.remove(best_link)
         try:
-            os.remove(to_delete)
-        except FileNotFoundError:
-            logger.warning(
-                "Wanted to delete old checkpoint %s but " "file does not exist.",
-                to_delete,
-            )
+            os.symlink(tag+'.ckpt', best_link)
+            logger.info('Created symlink best.ckpt -> ' + tag+'.ckpt')
+        except Exception as e:
+            # Fallback to copy if symlink fails
+            shutil.copy(ckpt_file, best_link)
+            logger.info('Copied best.ckpt (symlink failed: {})'.format(e))
+            
     ckpt_queue.put(ckpt_file)        
 
     
@@ -144,17 +155,50 @@ if __name__ == "__main__":
         latest_ckpt = ckpt_lst[-1]
         latest_ckpt = os.path.join(model_dir, 'ckpts', latest_ckpt)
         state_dict = torch.load(latest_ckpt, 'cuda:{:d}'.format(cfg['local_rank']))
-        model.module.load_state_dict(state_dict['model_state'])
-        optimizer.load_state_dict(state_dict['optimizer_state'])
+        model.module.load_state_dict(state_dict['model_state'], strict=False)
+        
+        # Filter loaded optimizer state to handle parameter size changes in upgraded groups
+        loaded_opt_state = state_dict['optimizer_state']
+        for loaded_group, current_group in zip(loaded_opt_state['param_groups'], optimizer.param_groups):
+            if len(loaded_group['params']) != len(current_group['params']):
+                # Remove state entries for the old mismatched parameters in this group
+                for p_id in loaded_group['params']:
+                    loaded_opt_state['state'].pop(p_id, None)
+                # Match the loaded group's params list to the current group
+                loaded_group['params'] = current_group['params']
+
+        optimizer.load_state_dict(loaded_opt_state)
         scheduler.load_state_dict(state_dict['scheduler_state'])
-        start_epoch = state_dict['epoch']+1 if state_dict['epoch'] is not None else int(latest_ckpt.split('_')[-1][:-5])+1
         global_step = state_dict['global_step']+1 if state_dict['global_step'] is not None else 0
+        start_epoch = state_dict['epoch']+1 if state_dict['epoch'] is not None else (global_step // 6343)
         best_score = state_dict['best_score']
 
         torch.manual_seed(cfg["training"].get("random_seed", 42)+start_epoch)
         train_dataloader, train_sampler = build_dataloader(cfg, 'train', model.module.text_tokenizer, model.module.gloss_tokenizer)
         dev_dataloader, dev_sampler = build_dataloader(cfg, 'dev', model.module.text_tokenizer, model.module.gloss_tokenizer)
         logger.info('Sucessfully resume training from {:s}'.format(latest_ckpt))
+        # Override learning rates from config (checkpoint restores old LRs)
+        rec_params = set(model.module.recognition_network.parameters())
+        trans_params = set(model.module.translation_network.parameters())
+        mapper_params = set(model.module.vl_mapper.parameters())
+
+        for param_group in optimizer.param_groups:
+            first_param = param_group['params'][0]
+            if first_param in rec_params:
+                group_name = 'recognition_network'
+            elif first_param in trans_params:
+                group_name = 'translation_network'
+            elif first_param in mapper_params:
+                group_name = 'vl_mapper'
+            else:
+                group_name = 'default'
+                
+            lr_ = cfg['training']['optimization']['learning_rate'].get('default', 1e-05)
+            for m, lr in cfg['training']['optimization']['learning_rate'].items():
+                if m in group_name:
+                    lr_ = lr
+            param_group['lr'] = lr_
+            logger.info('Override group {} learning rate to {}'.format(group_name, lr_))
         
 
     if is_main_process():
@@ -172,8 +216,7 @@ if __name__ == "__main__":
             model.module.set_train()
             output = model(is_train=True, **batch)
 
-            with torch.autograd.set_detect_anomaly(True):           
-                output['total_loss'].backward()
+            output['total_loss'].backward()
             if clip_grad_fun is not None:
                 clip_grad_fun(model.parameters())
             optimizer.step()
