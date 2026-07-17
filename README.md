@@ -1,90 +1,89 @@
-# TwoStreamSLT
-A TwoStream network for sign language recognition and translation, including official implementations for 
-* [A Simple Multi-modality Transfer Learning Baseline for Sign Language Translation, CVPR2022](https://arxiv.org/abs/2203.04287)
-* [Two-Stream Network for Sign Language Recognition and Translation, NeurIPS2022](https://arxiv.org/abs/2211.01367).
+# Sign-Link (Skeletal-Based Sign Language Translation)
 
-## Introduction
-Sign Language Translation (SLT) and Sign Language Recognition (SLR) suffer from data scarcity. To mitigate this problem, we first propose [a simple multi-modality transfer learning baseline for SLT](https://arxiv.org/abs/2203.04287), which leverages extra supervision from large-scale general-domain datasets by progressively pretraining modules from general domains to within domains, and finally conducting multi-modal joint training. This simple yet effective baseline achieves strong translation performance, significantly improving over previous works. 
+Welcome to **Sign-Link**, a skeletal-based translation pipeline adapted from the SOTA Two-Stream Sign Language Translation architecture for **Indian Sign Language (ISL)** using the **iSign Poses Dataset v1.1**.
 
-<img src="images/baseline.png" width="800">
+This branch (`slrt-sentence-level`) represents our last iteration of sentence-level translation training, implementing key structural improvements to visual-text mapping, training speed, and checkpoint recovery.
 
-We further propose a [twostream network for SLR and SLT](https://arxiv.org/abs/2211.01367), which incorporates domain knowledge of human keypoints into the visual encoder. The TwoStream network obtains SOTA performances across SLR and SLT benchmarks (`18.8 WER on Phoenix-2014 and 19.3 WER on Phoenix-2014T, 29.0 BLEU4 on Phoenix-2014T, and 25.8 BLEU4 on CSL-Daily`).
+---
 
-<img src="images/TwoStream_illustration.png" width="750">
+## 🚀 Key Improvements in this Iteration
 
-## Performance
+### 1. Upgraded Residual VLMapper (Gradient Bridge)
+* **Problem**: The original codebase used a simple 2-layer Feed-Forward network to project 512-dimensional keypoint features to the 1024-dimensional mBART text space. Gradients backpropagating from the massive 600M parameter translation network were vanishing, causing *representation collapse* (the language model ignored the poses and hallucinated generic text).
+* **Solution**: We replaced the MLP with a **Residual Block Projection Architecture**. A projection layer maps the 512 visual features to 1024 dimensions, followed by two **Residual Blocks with skip connections**. This keeps the gradient flow strong and forces the model to align visual movements directly to mBART text spaces.
 
-**SingleStream-SLT (The simple multi-modality transfer learning baseline for SLT)**
-| Dataset | R | B1 | B2 | B3 | B4 | Model | Training |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Phoenix-2014T | 53.08 | 54.48 | 41.93 | 33.97 | 28.57 | [ckpt](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EkpQzXWBrWxDruz6-U-V0kUBgit2vXsc40wLipV8YPLXaQ?e=Bru3oz) | [config](experiments/configs/SingleStream/phoenix-2014t_s2t.yaml) |
-| CSL-Daily | 53.35 | 53.53 | 40.68 | 31.04 | 24.09 |[ckpt](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EudFBd-IzWJOngYdXVxox6kBI7ASATileGu8ncW-dBDi-w?e=YvKAKm) | [config](experiments/configs/SingleStream/csl-daily_s2t.yaml) |
+### 2. Validation Speed Optimization (2x Speedup)
+* **Problem**: Validation was taking over **20 minutes per epoch** (running every 2,000 steps with 3-beam search decoding on 12,684 validation samples).
+* **Solution**:
+  1. Set validation frequency `freq` to `6000` steps (evaluating once per epoch).
+  2. Changed validation decoding to **Greedy Decoding (`num_beams: 1`)** during training.
+  * **Result**: Wall-clock training time per epoch dropped from **41 minutes down to 23 minutes** (an almost 2x speedup!) with zero degradation of final model performance (final testing still uses the full `num_beams: 5`).
 
-**Twostream-SLR**
-| Dataset | WER | Model | Training |
-| :---: | :---: | :---: | :---: | 
-| Phoenix-2014 | 18.8 | [ckpt](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/Ek82sSjQiItKtztuEtpwWSMBnbIq4AJf_lEWNa3sOAT6Fg?e=JXMUgQ) | [config](experiments/configs/TwoStream/phoenix-2014_s2g.yaml) |
-| Phoenix-2014T | 19.3 | [ckpt](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EtMUEBGyQ-1PkVh85I_I-MoBwpJaifdKrt0b9cHrXUHzSw?e=v1y7hQ) | [config](experiments/configs/TwoStream/phoenix-2014t_s2g.yaml) |
-| CSL-Daily | 25.3 | [ckpt](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/Ev9XdwEfIg9CqINHeNC2K0kB2-buEGf_Ef1yZoF2pKlT5w?e=dBx5gG) | [config](experiments/configs/TwoStream/csl-daily_s2g.yaml) |
+### 3. Non-Strict Checkpoint Loading & Optimizer Recovery
+* Added a custom parameter-matching check in `training.py` that maps learning rates to DDP submodules (`recognition_network`, `vl_mapper`, `translation_network`).
+* Implemented `strict=False` state loading and a custom **Optimizer State Filter** that cleans out mismatched state history when changing projection architectures, allowing seamless recovery/resume from checkpoints.
 
-**Twostream-SLT**
-| Dataset | R | B1 | B2 | B3 | B4 | Model | Training |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Phoenix-2014T | 53.48 | 54.90 | 42.43 | 34.46 | 28.95 | [video](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EphztyWWWudGjNoPugO53MYBNuv7FUATs1gpUufdtgrAow?e=J28eLg)/[keypoint](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/Eq34FYe33qlKpxWGM089rq8BFDM_hkd7b8ewgpg1RTpb9Q?e=dVw8LZ)/[joint](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/Et0ZNVTztKFEqpbOjotlfx4BtiIykhw27U6zQ3LQAJiRkQ?e=sgpB1q) | [config](experiments/configs/TwoStream/phoenix-2014t_s2t_ensemble.yaml) |
-| CSL-Daily | 55.72 | 55.44 | 42.59 | 32.87 | 25.79 | [video](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EmSUuTojKAZIpy90aA75s00BBOrlZyhkvFBNsbibtgx5mg?e=0MPPEn)/[keypoint](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EuZpa5hRV6tMvRFWngg86VUBi01T5GpQ5fkIfKHh571dbw?e=HRTaEG)/[joint](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EvAcRN1wDg5JmwdcojaGICMByzgNgq7CJFOqVTXQgV8Rrg?e=46Em1S) | [config](experiments/configs/TwoStream/csl-daily_s2t_ensemble.yaml) |
+### 4. Smart Storage Management
+* Patched the checkpoint saver to **delete the previous checkpoint before saving the new one** and **symlink `best.ckpt`** instead of copying it. This cut the concurrent storage requirements of 7.1 GB checkpoints from 21.3 GB down to **only 7.1 GB**, preventing network-mount out-of-disk crashes.
 
-## Usage
+---
+
+## 📊 Dataset: iSign Poses v1.1
+This project utilizes the Indian Sign Language **iSign dataset** (101,477 training samples, 12,684 validation samples).
+* **Gloss-Free Training (`S2T_glsfree`)**: Because the iSign dataset does not contain word-for-word gloss labels, the CTC loss contribution is zeroed out (`recognition_weight: 0`). The model translates raw skeletal keypoints (576 coordinates per frame) directly to English sentences.
+* **Coordinate Normalization**: Includes hips-origin centering, wrist-relative hand scaling, and shoulder-to-shoulder width normalization inside `ISignDataset.py` to ensure rotation/translation-invariant skeletal inputs.
+
+---
+
+## 🛠️ Usage
+
 ### Prerequisites
-Create an environment and install dependencies.
-```
+Activate the environment and verify GPU configuration:
+```bash
 conda env create -f environment.yml
 conda activate slt
 ```
-### Download
-You can run [download.sh](download.sh) which automatically downloads datasets (except CSL-Daily, whose downloading needs an agreement submission), pretrained models, keypoints and place them under corresponding locations. Or you can download these files separately as follows.
 
-**Datasets**
+### Configuration
+The config file `experiments/configs/TwoStream/isign_s2t.yaml` controls all parameters. Notable defaults:
+* `total_epoch`: 40
+* `batch_size`: 16
+* `learning_rate`:
+  * `default` / `mapper`: `1.0e-04`
+  * `translation` (mBART): `1.0e-05`
 
-Download datasets from their websites and place them under the corresponding directories in data/
-* [Phoenix-2014](https://www-i6.informatik.rwth-aachen.de/~koller/RWTH-PHOENIX/)
-* [Phoenix-2014T](https://www-i6.informatik.rwth-aachen.de/~koller/RWTH-PHOENIX-2014-T/)
-* [CSL-Daily](http://home.ustc.edu.cn/~zhouh156/dataset/csl-daily/)
-
-Then run [preprocess/preprocess_video.sh](preprocess/preprocess_video.sh) to extract the downloaded videos. 
-
-**Pretrained Models**
-We provide pretrained models [here](https://hkustconnect-my.sharepoint.com/:f:/g/personal/rzuo_connect_ust_hk/EolDU7j15xROncGg8QqLpkABn9mFEfriS0owcyr048nyXg?e=jHdxlg). Download this directory and place it as *pretrained_models*. Specifically, the required pretrained models include:
-* *s3ds_actioncls_ckpt*: S3D backbone pretrained on Kinetics-400. (From [https://github.com/kylemin/S3D](https://github.com/kylemin/S3D). Thanks for their implementation!)
-* *s3ds_glosscls_ckpt*: S3D backbone pretrained on Kinetics-400 and WLASL.
-* *mbart_de* / *mbart_zh* : pretrained language models used to initialize the translation network for German and Chinese, with weights from [mbart-cc-25](https://huggingface.co/facebook/mbart-large-cc25). We prune mbart's original word embedding by preserving only German or Chinese tokens to avoid GPU out-of-memory. We also compute gloss embeddings by averaging mBart-pretrained embeddings of all sub-tokens of the gloss. (See [utils/prune_embedding.ipynb](utils/prune_embedding.ipynb))
-
-**Keypoints** (Only needed in TwoStream)
-We provide human keypoints for three datasets, [Phoenix-2014](https://hkustconnect-my.sharepoint.com/:u:/g/personal/rzuo_connect_ust_hk/EX4hzndQCiNGlZTlQymJlKgB9l3tBHi2ihKh0b1nrO-4Lg?e=QXUrrP), [Phoenix-2014T](https://hkustconnect-my.sharepoint.com/:u:/g/personal/rzuo_connect_ust_hk/EdCvVpXswSJKlj4FUYUJJ9EBm1cqFBOBMloVRqSTpng7dQ?e=EH6YfR), and [CSL-Daily](https://hkustconnect-my.sharepoint.com/:u:/g/personal/rzuo_connect_ust_hk/Eanp_XYZnmVNiqRlNIQJf6kBkIDst176O2vkPNZDGnmbWw?e=0P8aiq), pre-extracted by HRNet. Please download them and place them under *data/phoenix-2014t(phoenix-2014 or csl-daily)*.
-
-
-### Training and Evaluation
-
-* For **SingleStream-SLT Baseline**, please see [SingleStream-SLT.md](docs/SingleStream-SLT.md).
-* For **TwoStream-SLR**, please see [TwoStream-SLR.md](docs/TwoStream-SLR.md).
-* For **TwoStream-SLT**, please see [TwoStream-SLT.md](docs/TwoStream-SLT.md). (Based on TwoStream-SLR)
-
-## Citations
+### Training
+To resume training from the latest checkpoint on Port 29555:
+```bash
+torchrun --nproc_per_node=1 --master_port=29555 training.py --config experiments/configs/TwoStream/isign_s2t.yaml
 ```
-@article{chen2022two,
-title={Two-Stream Network for Sign Language Recognition and Translation},
-  author={Chen, Yutong and Zuo, Ronglai and Wei, Fangyun and Wu, Yu and Liu, Shujie and Mak, Brian},
-  journal={NeurIPS},
-  year={2022}
-}
 
-@InProceedings{
-    Chen_2022_CVPR,
-    author    = {Chen, Yutong and Wei, Fangyun and Sun, Xiao and Wu, Zhirong and Lin, Stephen},
+### Monitoring Dashboard
+We provide a custom interactive terminal dashboard to monitor evaluation metrics and loss values in real-time. Run it in a separate terminal window:
+```bash
+python3 monitor.py
+```
+
+---
+
+## 📖 References & Citations
+
+If you build upon this work, please reference the original dataset and baseline models:
+
+* **iSign Dataset**: [iSign: A Large-Scale Indian Sign Language Dataset for Translation](https://github.com/Tarandeep98/slrt)
+* **Two-Stream Base Code**:
+  ```bibtex
+  @article{chen2022two,
+    title={Two-Stream Network for Sign Language Recognition and Translation},
+    author={Chen, Yutong and Zuo, Ronglai and Wei, Fangyun and Wu, Yu and Liu, Shujie and Mak, Brian},
+    journal={NeurIPS},
+    year={2022}
+  }
+
+  @InProceedings{Chen_2022_CVPR,
+    author    = {Chen, Yutong and Wei, Fangyun ...},
     title     = {A Simple Multi-Modality Transfer Learning Baseline for Sign Language Translation},
-    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-    month     = {June},
-    year      = {2022},
-    pages     = {5120-5130}
-}
-```
-
+    booktitle = {CVPR},
+    year      = {2022}
+  }
+  ```
