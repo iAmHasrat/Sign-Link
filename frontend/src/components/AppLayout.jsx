@@ -1,4 +1,4 @@
-import { Bell, History, Home, LogOut, MessageSquare, Moon, Search, Settings, User, Video } from 'lucide-react';
+import { Bell, History, Home, LogOut, MessageSquare, Moon, Search, Settings, User, Video, Languages } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useI18n } from '../contexts/I18nContext.jsx';
@@ -9,6 +9,7 @@ const navItems = [
   ['search', '/search', Search],
   ['chat', '/chat', MessageSquare],
   ['videoCall', '/call', Video],
+  ['translation', '/translation', Languages],
   ['history', '/history', History],
   ['profile', '/profile', User],
   ['settings', '/settings', Settings]
