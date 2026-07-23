@@ -127,50 +127,80 @@ sessions_lock = threading.Lock()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RULE-BASED GESTURE CLASSIFIER  (replaces GCN model)
-# Detects: HELLO, THANK_YOU, GOOD, BAD, LOVE, STOP, TEN, HOW, PEACE, POINT, ONE–FIVE
+# GESTURE MAPPER  ·  Rule-based, zero-weight, pure MediaPipe landmarks
+# ─────────────────────────────────────────────────────────────────────────────
+# Gesture → how to perform it:
+#   HELLO      right hand open, ANY height — always hello/wave
+#   THANK_YOU  both hands together (namaste), wrists < 0.18 apart
+#   STOP       both hands open palm, wrists between 0.18–0.50 apart
+#   LOVE       ILY: thumb + index + pinky up, middle + ring down (either hand)
+#   PEACE      right hand only: index + middle up (✌), ring + pinky down
+#   POINT      right hand: index ONLY up pointing — YOU or ME (LLM decides)
+#   GOOD       right thumbs up (others folded)
+#   BAD        right thumbs down (others folded)
+#   HOW        both hands present, one clearly in front of other (z-depth > 0.05)
+#   ONE–FIVE   LEFT hand ONLY, 1–5 non-thumb fingers extended (right = absent/fist)
 # ─────────────────────────────────────────────────────────────────────────────
 
-FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"]
-# MediaPipe hand landmark indices: Each finger [MCP, PIP, DIP, TIP]
-FINGER_TIPS   = [4, 8, 12, 16, 20]
-FINGER_PIPS   = [3, 6, 10, 14, 18]
-FINGER_MCPS   = [2, 5, 9, 13, 17]
-WRIST         = 0
+FINGER_TIPS  = [4, 8, 12, 16, 20]   # thumb, index, middle, ring, pinky TIPs
+FINGER_PIPS  = [3, 6, 10, 14, 18]   # corresponding PIPs
+FINGER_MCPS  = [2, 5,  9, 13, 17]   # corresponding MCPs
+WRIST        = 0
 
 
-def _lm(hand_list: list, idx: int) -> dict:
-    """Safely get a landmark dict from a flat list of {x,y,z} dicts."""
-    if hand_list and idx < len(hand_list):
-        return hand_list[idx]
+def _lm(hand: list, idx: int) -> dict:
+    """Safely retrieve a landmark dict {x,y,z} by index."""
+    if hand and idx < len(hand):
+        return hand[idx]
     return {"x": 0.0, "y": 0.0, "z": 0.0}
 
 
-def _finger_extended(hand: list, tip_idx: int, pip_idx: int, is_thumb: bool = False) -> bool:
-    """Return True if the finger is extended (straight out)."""
-    tip = _lm(hand, tip_idx)
-    pip = _lm(hand, pip_idx)
-    if not tip or not pip:
-        return False
-    if is_thumb:
-        mcp = _lm(hand, FINGER_MCPS[0])
-        return abs(tip["x"] - mcp["x"]) > abs(pip["x"] - mcp["x"])
-    # tip y < pip y means pointing up (y increases downward in image space)
-    return tip["y"] < pip["y"]
+# ── finger state helpers ──────────────────────────────────────────────────────
+
+def _finger_up(hand: list, tip: int, pip: int) -> bool:
+    """Non-thumb finger extended upward: tip.y < pip.y (image y goes down)."""
+    t, p = _lm(hand, tip), _lm(hand, pip)
+    return t["y"] < p["y"] - 0.02          # 2% hysteresis to reduce noise
+
+
+def _thumb_extended(hand: list) -> bool:
+    """Thumb extended sideways: tip.x significantly further than pip.x from MCP."""
+    tip = _lm(hand, 4)
+    pip = _lm(hand, 3)
+    mcp = _lm(hand, 2)
+    return abs(tip["x"] - mcp["x"]) > abs(pip["x"] - mcp["x"]) + 0.015
+
+
+def _fingers_state(hand: list) -> tuple[bool, bool, bool, bool, bool]:
+    """Return (thumb, index, middle, ring, pinky) extension booleans."""
+    th = _thumb_extended(hand)
+    ix = _finger_up(hand, 8,  6)
+    mi = _finger_up(hand, 12, 10)
+    ri = _finger_up(hand, 16, 14)
+    pi = _finger_up(hand, 20, 18)
+    return th, ix, mi, ri, pi
+
+
+def count_non_thumb_fingers(hand: list) -> int:
+    """Count how many of the 4 non-thumb fingers are extended."""
+    if not hand:
+        return 0
+    return sum([
+        _finger_up(hand, 8,  6),
+        _finger_up(hand, 12, 10),
+        _finger_up(hand, 16, 14),
+        _finger_up(hand, 20, 18),
+    ])
 
 
 def count_extended_fingers(hand: list) -> int:
-    """Count how many fingers (including thumb) are extended on a hand."""
+    """Count ALL extended fingers including thumb (used for open-hand detection)."""
     if not hand:
         return 0
-    total = 0
-    if _finger_extended(hand, 4, 3, is_thumb=True):
-        total += 1
-    for tip, pip in zip(FINGER_TIPS[1:], FINGER_PIPS[1:]):
-        if _finger_extended(hand, tip, pip):
-            total += 1
-    return total
+    return int(_thumb_extended(hand)) + count_non_thumb_fingers(hand)
 
+
+# ── geometry helpers ──────────────────────────────────────────────────────────
 
 def _wrist_y(hand: list) -> float:
     return _lm(hand, WRIST)["y"] if hand else 1.0
@@ -181,81 +211,68 @@ def _wrist_x(hand: list) -> float:
 def _wrist_z(hand: list) -> float:
     return _lm(hand, WRIST)["z"] if hand else 0.0
 
+def _wrist_dist(lh: list, rh: list) -> float:
+    lx, ly = _wrist_x(lh), _wrist_y(lh)
+    rx, ry = _wrist_x(rh), _wrist_y(rh)
+    return ((lx - rx) ** 2 + (ly - ry) ** 2) ** 0.5
 
-def _wrist_dist_xy(left_hand: list, right_hand: list) -> float:
-    lw_x, lw_y = _wrist_x(left_hand), _wrist_y(left_hand)
-    rw_x, rw_y = _wrist_x(right_hand), _wrist_y(right_hand)
-    return ((lw_x - rw_x) ** 2 + (lw_y - rw_y) ** 2) ** 0.5
 
+# ── gesture detectors ─────────────────────────────────────────────────────────
 
 def _open_hand(hand: list) -> bool:
-    """4 or more fingers extended (open palm)."""
-    return count_extended_fingers(hand) >= 4
+    """Open palm: 4 or more fingers extended (thumb optional)."""
+    return count_non_thumb_fingers(hand) >= 4
 
 
 def _thumb_up(hand: list) -> bool:
-    """Thumb up: thumb extended upward, all other fingers folded."""
+    """Thumbs-up: thumb extended upward, all 4 fingers folded."""
     if not hand:
         return False
-    thumb_tip = _lm(hand, 4)
-    thumb_mcp = _lm(hand, 2)
-    thumb_pointing_up = thumb_tip["y"] < thumb_mcp["y"] - 0.04
-    others_folded = all(
-        not _finger_extended(hand, tip, pip)
-        for tip, pip in zip(FINGER_TIPS[1:], FINGER_PIPS[1:])
-    )
-    return thumb_pointing_up and others_folded
+    _, ix, mi, ri, pi = _fingers_state(hand)
+    if ix or mi or ri or pi:           # any finger up = not a clean thumbs-up
+        return False
+    tip = _lm(hand, 4)
+    mcp = _lm(hand, 2)
+    return tip["y"] < mcp["y"] - 0.05  # thumb tip clearly above its base
 
 
 def _thumb_down(hand: list) -> bool:
-    """Thumb down: thumb tip below wrist, all other fingers folded."""
+    """Thumbs-down: thumb pointing downward, all 4 fingers folded."""
     if not hand:
         return False
-    thumb_tip = _lm(hand, 4)
-    wrist     = _lm(hand, WRIST)
-    thumb_pointing_down = thumb_tip["y"] > wrist["y"] + 0.04
-    others_folded = all(
-        not _finger_extended(hand, tip, pip)
-        for tip, pip in zip(FINGER_TIPS[1:], FINGER_PIPS[1:])
-    )
-    return thumb_pointing_down and others_folded
+    _, ix, mi, ri, pi = _fingers_state(hand)
+    if ix or mi or ri or pi:
+        return False
+    tip = _lm(hand, 4)
+    wrist = _lm(hand, WRIST)
+    return tip["y"] > wrist["y"] + 0.05  # thumb tip clearly below wrist
 
 
 def _love_sign(hand: list) -> bool:
-    """ILY: thumb + index + pinky extended; middle + ring folded."""
+    """ILY hand: thumb + index + pinky up; middle + ring folded."""
     if not hand:
         return False
-    thumb  = _finger_extended(hand, 4, 3, is_thumb=True)
-    index  = _finger_extended(hand, 8, 6)
-    middle = _finger_extended(hand, 12, 10)
-    ring   = _finger_extended(hand, 16, 14)
-    pinky  = _finger_extended(hand, 20, 18)
-    return thumb and index and pinky and not middle and not ring
+    th, ix, mi, ri, pi = _fingers_state(hand)
+    return th and ix and pi and not mi and not ri
 
 
 def _peace_sign(hand: list) -> bool:
-    """Peace/Victory: index + middle extended; ring + pinky folded."""
+    """Peace/victory: index + middle up; ring + pinky folded; thumb flexible."""
     if not hand:
         return False
-    index  = _finger_extended(hand, 8, 6)
-    middle = _finger_extended(hand, 12, 10)
-    ring   = _finger_extended(hand, 16, 14)
-    pinky  = _finger_extended(hand, 20, 18)
-    return index and middle and not ring and not pinky
+    _, ix, mi, ri, pi = _fingers_state(hand)
+    return ix and mi and not ri and not pi
 
 
 def _point_sign(hand: list) -> bool:
-    """Pointing: index finger only extended; middle + ring + pinky folded."""
+    """Pointing: index ONLY extended; middle, ring, pinky all folded."""
     if not hand:
         return False
-    index  = _finger_extended(hand, 8, 6)
-    middle = _finger_extended(hand, 12, 10)
-    ring   = _finger_extended(hand, 16, 14)
-    pinky  = _finger_extended(hand, 20, 18)
-    return index and not middle and not ring and not pinky
+    _, ix, mi, ri, pi = _fingers_state(hand)
+    return ix and not mi and not ri and not pi
 
 
-# Counting words for left hand fingers 1-5
+# ── counting words (left hand, 1–5 non-thumb fingers) ────────────────────────
 COUNT_WORDS = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE"]
 
 
