@@ -8,20 +8,15 @@ import { useTheme } from '../contexts/ThemeContext.jsx';
 const navItems = [
   ['dashboard', '/dashboard', Home],
   ['translator', '/translator', Sparkles],
-  ['search', '/search', Search],
-  ['chat', '/chat', MessageSquare],
   ['videoCall', '/call', Video],
   ['history', '/history', History],
   ['profile', '/profile', User],
   ['settings', '/settings', Settings]
 ];
 
-// The four most-reached-for actions live in the bottom tab bar on phones;
-// everything else is one tap away in the drawer.
 const tabItems = [
   ['dashboard', '/dashboard', Home],
   ['translator', '/translator', Sparkles],
-  ['chat', '/chat', MessageSquare],
   ['videoCall', '/call', Video]
 ];
 
