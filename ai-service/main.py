@@ -272,6 +272,22 @@ def _point_sign(hand: list) -> bool:
     return ix and not mi and not ri and not pi
 
 
+def _help_sign(hand: list) -> bool:
+    """HELP sign: thumb + pinky extended; index, middle, ring folded."""
+    if not hand:
+        return False
+    th, ix, mi, ri, pi = _fingers_state(hand)
+    return th and pi and not ix and not mi and not ri
+
+
+def _fist_sign(hand: list) -> bool:
+    """Fist closed: all fingers folded."""
+    if not hand:
+        return False
+    th, ix, mi, ri, pi = _fingers_state(hand)
+    return not th and not ix and not mi and not ri and not pi
+
+
 # ── counting words (left hand, 1–5 non-thumb fingers) ────────────────────────
 COUNT_WORDS = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE"]
 
@@ -283,14 +299,16 @@ def classify_gesture_rules(pose: list, left_hand: list, right_hand: list) -> tup
     PRIORITY (first match wins):
       1  THANK_YOU  — both wrists < 0.18 apart (namaste / hands together)
       2  STOP       — both hands open, wrists 0.18–0.55 apart
-      3  HOW        — both hands present + z-depth diff > 0.05, not both open
-      4  HELLO      — right hand open, ANY wrist height (always hello/wave)
-      5  LOVE       — ILY sign on either hand
-      6  PEACE      — right hand only: index + middle up (✌)
-      7  POINT      — right hand index only up (YOU or ME — LLM decides)
-      8  GOOD       — right thumbs up
-      9  BAD        — right thumbs down
-      10 ONE–FIVE   — left hand ONLY, 1–5 non-thumb fingers (right = absent/fist)
+      3  DEAF_MUTE  — both hands closed in fists (or fist hand)
+      4  HELP       — pinky + thumb extended (shaka / help hand shape)
+      5  HOW        — both hands present + z-depth diff > 0.05, not both open
+      6  HELLO      — right hand open, ANY wrist height (always hello/wave)
+      7  LOVE       — ILY sign on either hand
+      8  PEACE      — right hand only: index + middle up (✌)
+      9  POINT      — right hand index only up (YOU or ME — LLM decides)
+      10 GOOD       — right thumbs up
+      11 BAD        — right thumbs down
+      12 ONE–FIVE   — left hand ONLY, 1–5 non-thumb fingers (right = absent/fist)
 
     Returns ("", 0.0) when nothing matches.
     """
@@ -309,34 +327,45 @@ def classify_gesture_rules(pose: list, left_hand: list, right_hand: list) -> tup
         if 0.18 <= d <= 0.55:
             return ("STOP", 1.0)
 
-    # ── 3. HOW — one hand in front of the other (z-depth) ────────────────────
+    # ── 3. DEAF_MUTE — BOTH hands closed as fists ─────────────────────────────
+    if has_left and has_right and _fist_sign(left_hand) and _fist_sign(right_hand):
+        return ("DEAF_MUTE", 1.0)
+
+    # ── 4. HELP — pinky + thumb extended (either hand) ────────────────────────
+    if has_right and _help_sign(right_hand):
+        return ("HELP", 1.0)
+    if has_left and _help_sign(left_hand):
+        return ("HELP", 1.0)
+
+    # ── 5. HOW — one hand in front of the other (z-depth) ────────────────────
     if has_left and has_right:
         if abs(_wrist_z(left_hand) - _wrist_z(right_hand)) > 0.05:
             # Guard: don't fire HOW when both hands are fully open (would be STOP)
             if not (_open_hand(left_hand) and _open_hand(right_hand)):
                 return ("HOW", 0.90)
 
-    # ── 4. HELLO — right hand open at ANY height ─────────────────────────────
+    # ── 6. HELLO — right hand open at ANY height ─────────────────────────────
     if has_right and _open_hand(right_hand):
         return ("HELLO", 1.0)
 
-    # ── 5. LOVE (ILY) — either hand ──────────────────────────────────────────
+    # ── 7. LOVE (ILY) — either hand ──────────────────────────────────────────
     if has_right and _love_sign(right_hand):
         return ("LOVE", 1.0)
     if has_left and _love_sign(left_hand):
         return ("LOVE", 1.0)
 
-    # ── 6. PEACE — right hand ONLY (left ✌ = counting TWO) ──────────────────
+    # ── 8. PEACE — right hand ONLY (left ✌ = counting TWO) ──────────────────
     if has_right and _peace_sign(right_hand):
         return ("PEACE", 1.0)
 
-    # ── 7. POINT — right index finger only ───────────────────────────────────
+    # ── 9. POINT — right index finger only ───────────────────────────────────
     if has_right and _point_sign(right_hand):
         return ("POINT", 1.0)
 
-    # ── 8. GOOD — right thumbs up ────────────────────────────────────────────
+    # ── 10. GOOD — right thumbs up ────────────────────────────────────────────
     if has_right and _thumb_up(right_hand):
         return ("GOOD", 1.0)
+
 
     # ── 9. BAD — right thumbs down ───────────────────────────────────────────
     if has_right and _thumb_down(right_hand):
@@ -1033,7 +1062,7 @@ async def stop_session(payload: SessionControlRequest) -> dict[str, str]:
     print(f"[AI Session] Stopping session {session_id}. Gloss list size: {len(gloss_list)}")
     
     if len(gloss_list) == 0:
-        return {"translation": "No gestures detected. Please sign in front of the camera."}
+        return {"translation": ""}
         
     translation = await translate_glosses(gloss_list, final=True)
     return {"translation": translation}

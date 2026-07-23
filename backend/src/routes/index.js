@@ -12,4 +12,6 @@ apiRouter.use('/auth', authRouter);
 apiRouter.use('/users', userRouter);
 apiRouter.use('/messages', messageRouter);
 apiRouter.use('/calls', callRouter);
+apiRouter.use('/ai', aiRouter);
 apiRouter.use('/', aiRouter);
+

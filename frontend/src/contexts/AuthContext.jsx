@@ -5,44 +5,53 @@ import { storage } from '../utils/storage.js';
 
 const AuthContext = createContext(null);
 
-function getSavedUser() {
-  try {
-    return JSON.parse(storage.get('sign-link-user') || 'null');
-  } catch {
-    storage.remove('sign-link-token');
-    storage.remove('sign-link-user');
-    return null;
-  }
-}
-
-const mockUser = {
+const userA = {
   id: 999,
-  full_name: 'Developer Guest',
-  email: 'dev@signlink.org',
-  role: 'Developer'
+  user_id: 999,
+  full_name: 'User A (Laptop 1)',
+  email: 'a@signlink.org',
+  role: 'Developer',
+  username: 'dev_a'
 };
-const mockToken = 'mock-developer-jwt-token';
+
+const userB = {
+  id: 888,
+  user_id: 888,
+  full_name: 'User B (Laptop 2)',
+  email: 'b@signlink.org',
+  role: 'Developer',
+  username: 'dev_b'
+};
+
+const tokenA = 'mock-token-a';
+const tokenB = 'mock-token-b';
 
 export function AuthProvider({ children }) {
-  // Ensure mock values are in storage on startup for Axios interceptors
   if (!storage.get('sign-link-token')) {
-    storage.set('sign-link-token', mockToken);
-    storage.set('sign-link-user', JSON.stringify(mockUser));
+    storage.set('sign-link-token', tokenA);
+    storage.set('sign-link-user', JSON.stringify(userA));
   }
 
-  const [token, setToken] = useState(() => storage.get('sign-link-token') || mockToken);
+  const [token, setToken] = useState(() => storage.get('sign-link-token') || tokenA);
   const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(storage.get('sign-link-user')) || mockUser;
+      return JSON.parse(storage.get('sign-link-user')) || userA;
     } catch {
-      return mockUser;
+      return userA;
     }
   });
   const [loading, setLoading] = useState(false);
+  const [socket, setSocket] = useState(null);
 
+  // Manage live Socket.IO connection
   useEffect(() => {
-    // Disable server-side session refresh to bypass database
-    setLoading(false);
+    if (token) {
+      const s = getSocket(token);
+      setSocket(s);
+    } else {
+      disconnectSocket();
+      setSocket(null);
+    }
   }, [token]);
 
   const value = useMemo(
@@ -50,19 +59,20 @@ export function AuthProvider({ children }) {
       token,
       user,
       loading,
-      socket: null,
+      socket,
+      switchUser(type = 'A') {
+        const nextUser = type === 'B' ? userB : userA;
+        const nextToken = type === 'B' ? tokenB : tokenA;
+        storage.set('sign-link-token', nextToken);
+        storage.set('sign-link-user', JSON.stringify(nextUser));
+        setToken(nextToken);
+        setUser(nextUser);
+      },
       async login(payload) {
-        const email = payload.email || 'dev@signlink.org';
-        const name = email.split('@')[0];
-        const isB = name.toLowerCase().includes('b');
-        const customUser = {
-          id: isB ? 888 : 999,
-          full_name: isB ? 'Developer B' : 'Developer A',
-          email: email,
-          role: 'Developer',
-          username: isB ? 'dev_b' : 'dev_a'
-        };
-        const customToken = isB ? 'mock-token-b' : 'mock-token-a';
+        const email = payload.email || 'a@signlink.org';
+        const isB = email.toLowerCase().includes('b');
+        const customUser = isB ? userB : userA;
+        const customToken = isB ? tokenB : tokenA;
 
         storage.set('sign-link-token', customToken);
         storage.set('sign-link-user', JSON.stringify(customUser));
@@ -70,17 +80,10 @@ export function AuthProvider({ children }) {
         setUser(customUser);
       },
       async register(payload) {
-        const email = payload.email || 'dev@signlink.org';
-        const name = email.split('@')[0];
-        const isB = name.toLowerCase().includes('b');
-        const customUser = {
-          id: isB ? 888 : 999,
-          full_name: isB ? 'Developer B' : 'Developer A',
-          email: email,
-          role: 'Developer',
-          username: isB ? 'dev_b' : 'dev_a'
-        };
-        const customToken = isB ? 'mock-token-b' : 'mock-token-a';
+        const email = payload.email || 'a@signlink.org';
+        const isB = email.toLowerCase().includes('b');
+        const customUser = isB ? userB : userA;
+        const customToken = isB ? tokenB : tokenA;
 
         storage.set('sign-link-token', customToken);
         storage.set('sign-link-user', JSON.stringify(customUser));
@@ -98,12 +101,10 @@ export function AuthProvider({ children }) {
         setUser(null);
       }
     }),
-    [loading, token, user]
+    [loading, token, user, socket]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-
 
 export const useAuth = () => useContext(AuthContext);

@@ -9,18 +9,53 @@ export const translate = asyncHandler(async (req, res) => {
   if (!text.trim()) {
     return res.json({ sourceText: text, translatedText: '', targetLanguage });
   }
+
+  const langMap = {
+    hi: 'hi',
+    pa: 'pa',
+    en: 'en',
+    es: 'es',
+    fr: 'fr',
+    de: 'de',
+    zh: 'zh-CN'
+  };
+  const tl = langMap[targetLanguage] || targetLanguage || 'en';
+
+  // Primary: Google GTX Translation API
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLanguage}&dt=t&q=${encodeURIComponent(text)}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Google Translate returned status ${response.status}`);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const translatedText = data[0].map((item) => item[0]).join('');
+      if (translatedText) {
+        return res.json({ sourceText: text, translatedText, targetLanguage: tl, provider: 'google-gtx' });
+      }
     }
-    const data = await response.json();
-    const translatedText = data[0].map((item) => item[0]).join('');
-    res.json({ sourceText: text, translatedText, targetLanguage, provider: 'google-gtx' });
-  } catch (error) {
-    res.status(500).json({ message: 'Translation failed: ' + error.message });
+  } catch (err) {
+    console.warn('[AI Controller] Primary Google GTX translate failed, trying MyMemory fallback:', err.message);
   }
+
+  // Fallback: MyMemory Translation API
+  try {
+    const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${tl}`;
+    const fbRes = await fetch(fallbackUrl);
+    if (fbRes.ok) {
+      const fbData = await fbRes.json();
+      const translatedText = fbData?.responseData?.translatedText;
+      if (translatedText) {
+        return res.json({ sourceText: text, translatedText, targetLanguage: tl, provider: 'mymemory' });
+      }
+    }
+  } catch (fbErr) {
+    console.error('[AI Controller] Fallback translation failed:', fbErr.message);
+  }
+
+  res.json({ sourceText: text, translatedText: text, targetLanguage: tl, provider: 'passthrough' });
 });
 
 export const speechToText = asyncHandler(async (req, res) => {

@@ -51,23 +51,40 @@ export function useSpeechToText({ onResult, continuous = false } = {}) {
       const resultIndex = event.resultIndex;
       const currentResult = event.results[resultIndex];
       const text = (currentResult[0]?.transcript || '').trim();
-      const isFinal = currentResult.isFinal || false;
-      
+      let isFinal = currentResult.isFinal || false;
+
       if (text) {
+        // Force finalization if speaker reached sentence end (. ! ?)
+        if (/[.!?]$/.test(text)) {
+          isFinal = true;
+        }
+
         onResult?.(text, isFinal);
 
-        // Auto-finalize on short silence (1.5 seconds) to reduce latency
         if (!isFinal) {
+          // 1. Pause detector (1.2 seconds of silence = finalize sentence chunk)
           if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
           silenceTimerRef.current = setTimeout(() => {
-            console.log("[Speech] Silence timeout reached. Finalizing chunk...");
-            recognition.stop(); // triggers final result and ends session
-          }, 1500);
+            console.log("[Speech] Pause detected (1.2s). Finalizing sentence chunk...");
+            try { recognition.stop(); } catch (e) {}
+          }, 1200);
+
+          // 2. Max duration cap (15 seconds): break continuous long speech into separate messages
+          if (!maxSpeechTimerRef.current) {
+            maxSpeechTimerRef.current = setTimeout(() => {
+              console.log("[Speech] Max 15s continuous speech limit reached. Finalizing current sentence message...");
+              if (maxSpeechTimerRef.current) clearTimeout(maxSpeechTimerRef.current);
+              maxSpeechTimerRef.current = null;
+              try { recognition.stop(); } catch (e) {}
+            }, 15000);
+          }
         } else {
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+          if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+          if (maxSpeechTimerRef.current) { clearTimeout(maxSpeechTimerRef.current); maxSpeechTimerRef.current = null; }
         }
       }
     };
+
 
     recognitionRef.current = recognition;
     recognition.start();

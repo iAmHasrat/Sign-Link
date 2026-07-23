@@ -2164,3 +2164,59 @@ select:focus {
   font-weight: 600;
   letter-spacing: 0.04em;
 }
+
+/* ── Video Subtitle Banner (Live Speech-to-Text Overlay) ──────────────── */
+.video-subtitle-banner {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 14px;
+  padding: 10px 22px;
+  color: #ffffff;
+  max-width: 82%;
+  min-width: 240px;
+  text-align: center;
+  z-index: 30;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.2);
+  animation: fadeInSubtitle 0.2s ease-out;
+}
+
+.video-subtitle-banner.local {
+  bottom: 80px;
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
+.subtitle-tag {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #38bdf8;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.video-subtitle-banner.local .subtitle-tag {
+  color: #c084fc;
+}
+
+.subtitle-content {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0;
+  color: #f8fafc;
+  word-break: break-word;
+}
+
+@keyframes fadeInSubtitle {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+

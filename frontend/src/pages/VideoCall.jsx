@@ -26,14 +26,23 @@ function logPeerState(pc) {
 
 export function VideoCall() {
   const { peerId } = useParams();
-  const { socket, user } = useAuth();
+  const { socket, user, switchUser } = useAuth();
   const { t } = useI18n();
   const { speak } = useTextToSpeech();
 
-  const [receiverId, setReceiverId] = useState(peerId || '');
+  const defaultOppositeId = String(user?.id) === '888' ? '999' : '888';
+  const [receiverId, setReceiverId] = useState(peerId || defaultOppositeId);
   const [callId, setCallId] = useState(null);
   const [status, setStatus] = useState('Ready');
   const [commMode, setCommMode] = useState(null); // 'Hearing' or 'DeafMute'
+
+  // Pre-fill receiver ID when identity changes
+  useEffect(() => {
+    if (!peerId) {
+      setReceiverId(String(user?.id) === '888' ? '999' : '888');
+    }
+  }, [user?.id, peerId]);
+
   const [isSwapped, setIsSwapped] = useState(false); // swap local <-> remote PiP
   const [autoTTS, setAutoTTS] = useState(true);
   const autoTTSRef = useRef(true);
@@ -61,33 +70,50 @@ export function VideoCall() {
   const [liveGestureWord, setLiveGestureWord] = useState('');
   const [liveGlosses, setLiveGlosses] = useState([]);
 
-  const { listening, start: startSTT, stop: stopSTT } = useSpeechToText({
+  const lastTranscriptRef = useRef('');
+
+  const { listening, supported: supportedSTT, start: startSTT, stop: stopSTT } = useSpeechToText({
     continuous: true,
     onResult: (text, isFinal) => {
+      if (!text || !text.trim()) return;
+      lastTranscriptRef.current = text.trim();
+
       if (!isFinal) {
         setLocalLiveCaption(text);
         if (receiverId) {
-          socket?.emit('live-caption', { receiverId: Number(receiverId), text });
+          socket?.emit('live-caption', { receiverId: String(receiverId), text });
         }
       } else {
         setLocalLiveCaption('');
+        const textToSend = text.trim();
+        lastTranscriptRef.current = '';
         const newEntry = {
           sender: 'me',
-          text,
+          text: textToSend,
           inputMethod: 'voice',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         setCallHistory((prev) => [...prev, newEntry]);
         if (receiverId) {
           socket?.emit('translation', {
-            receiverId: Number(receiverId),
-            text,
+            receiverId: String(receiverId),
+            text: textToSend,
             inputMethod: 'voice'
           });
+          socket?.emit('live-caption', { receiverId: String(receiverId), text: '' });
         }
       }
     }
   });
+
+  // Auto-start or stop Speech Recognition based on mode and audio state
+  useEffect(() => {
+    if (commMode === 'Hearing' && audioOn && supportedSTT) {
+      if (!listening) startSTT();
+    } else if (commMode === 'DeafMute' || !audioOn) {
+      if (listening) stopSTT();
+    }
+  }, [commMode, audioOn, supportedSTT, listening, startSTT, stopSTT]);
 
   function selectMode(mode) {
     setCommMode(mode);
@@ -100,8 +126,10 @@ export function VideoCall() {
         });
       }
       setAudioOn(false);
+      stopSTT();
     }
   }
+
 
   function handleSpeak(text, idx) {
     if (!('speechSynthesis' in window)) return;
@@ -333,8 +361,11 @@ export function VideoCall() {
                     
                     const translation = await stopSession(sessionId);
                     if (translation && 
+                        translation.trim() !== "" &&
                         !translation.includes("No hands detected") && 
-                        !translation.includes("Gesture too short")) {
+                        !translation.includes("Gesture too short") &&
+                        !translation.includes("No gestures detected") &&
+                        !translation.includes("Please sign")) {
                       setLiveTranslationText(translation);
                       
                       const newEntry = {
@@ -487,8 +518,11 @@ export function VideoCall() {
         localLandmarkOverlay.current?.setStatus('Processing final translation...');
         const translation = await stopSession(sessionId);
         if (translation && 
+            translation.trim() !== "" &&
             !translation.includes("No hands detected") && 
-            !translation.includes("Gesture too short")) {
+            !translation.includes("Gesture too short") &&
+            !translation.includes("No gestures detected") &&
+            !translation.includes("Please sign")) {
           setLiveTranslationText(translation);
           
           const newEntry = {
@@ -518,6 +552,11 @@ export function VideoCall() {
     }
   }
 
+  // Pre-load camera stream on page open so local preview displays immediately
+  useEffect(() => {
+    ensureMedia('autoPreload').catch((err) => console.warn('[WebRTC] Camera preload error:', err));
+  }, []);
+
   async function ensureMedia(executionPath) {
     if (localStream.current) {
       if (localVideo.current && localVideo.current.srcObject !== localStream.current) {
@@ -528,8 +567,23 @@ export function VideoCall() {
 
     if (mediaRequest.current) return mediaRequest.current;
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = 'Camera access requires HTTPS when opened on another computer! Please use the HTTPS tunnel link.';
+      console.error(msg);
+      alert(msg);
+      throw new Error(msg);
+    }
+
     mediaRequest.current = navigator.mediaDevices
       .getUserMedia({ video: cameraConstraints, audio: true })
+      .catch((err) => {
+        console.warn('[WebRTC] Ideal constraints failed, trying basic { video: true }:', err);
+        return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      })
+      .catch((err) => {
+        console.warn('[WebRTC] Audio failed, trying video-only stream:', err);
+        return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      })
       .then((stream) => {
         localStream.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
@@ -543,6 +597,8 @@ export function VideoCall() {
     await mediaRequest.current;
     return localStream.current;
   }
+
+
 
   function attachPeerDiagnostics(pc) {
     pc.oniceconnectionstatechange = () => logPeerState(pc);
@@ -654,8 +710,39 @@ export function VideoCall() {
   }
 
   function toggleAudio() {
-    localStream.current?.getAudioTracks().forEach((track) => (track.enabled = !audioOn));
-    setAudioOn(!audioOn);
+    const nextAudioState = !audioOn;
+    localStream.current?.getAudioTracks().forEach((track) => (track.enabled = nextAudioState));
+    setAudioOn(nextAudioState);
+
+    if (commMode === 'Hearing') {
+      if (!nextAudioState) {
+        // Muting mic -> stop STT and automatically send spoken text as message
+        stopSTT();
+        const pendingText = (lastTranscriptRef.current || localLiveCaption || '').trim();
+        if (pendingText) {
+          setLocalLiveCaption('');
+          const newEntry = {
+            sender: 'me',
+            text: pendingText,
+            inputMethod: 'voice',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          setCallHistory((prev) => [...prev, newEntry]);
+          if (receiverId) {
+            socket?.emit('translation', {
+              receiverId: String(receiverId),
+              text: pendingText,
+              inputMethod: 'voice'
+            });
+            socket?.emit('live-caption', { receiverId: String(receiverId), text: '' });
+          }
+          lastTranscriptRef.current = '';
+        }
+      } else {
+        // Unmuting mic -> start converting speech to text
+        if (supportedSTT) startSTT();
+      }
+    }
   }
 
   function toggleVideo() {
@@ -708,13 +795,40 @@ export function VideoCall() {
   return (
     <section className="call-page">
       <div className="call-toolbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 'bold' }}>
+            My ID: <mark style={{ background: '#e0e7ff', color: '#3730a3', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>{user?.id || 999}</mark>
+          </span>
+          {switchUser && (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                type="button"
+                className={`btn-small ${String(user?.id) === '999' ? 'primary-button' : ''}`}
+                onClick={() => switchUser('A')}
+                title="Set identity to Laptop 1 (User 999)"
+              >
+                Laptop 1 (999)
+              </button>
+              <button
+                type="button"
+                className={`btn-small ${String(user?.id) === '888' ? 'primary-button' : ''}`}
+                onClick={() => switchUser('B')}
+                title="Set identity to Laptop 2 (User 888)"
+              >
+                Laptop 2 (888)
+              </button>
+            </div>
+          )}
+        </div>
+
         <label className="field compact">
           <span>Receiver ID</span>
-          <input value={receiverId} onChange={(e) => setReceiverId(e.target.value)} />
+          <input value={receiverId} onChange={(e) => setReceiverId(e.target.value)} placeholder="Target User ID" />
         </label>
         <div className="call-status">{status} · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</div>
         <button className="primary-button" onClick={startCall}><Video size={18} />{t('startCall')}</button>
       </div>
+
 
       <div className={`call-workspace ${status === 'Connected' ? 'with-sidebar' : ''}`}>
         <div className={`video-grid${isSwapped ? ' swapped' : ''}`}>
@@ -750,6 +864,22 @@ export function VideoCall() {
             className={isSwapped ? 'landmark-layer' : 'landmark-layer-fullscreen'}
           />
           <canvas ref={captureCanvas} className="hidden-canvas" />
+          {/* Live Subtitle Banner on Remote Video Screen */}
+          {remoteLiveCaption && (
+            <div className="video-subtitle-banner">
+              <span className="subtitle-tag">🎙️ Hearing Speaker (Live Text):</span>
+              <p className="subtitle-content">{remoteLiveCaption}</p>
+            </div>
+          )}
+
+          {/* Live Subtitle Banner on Local Video Screen */}
+          {localLiveCaption && (
+            <div className="video-subtitle-banner local">
+              <span className="subtitle-tag">🎙️ You (Speaking):</span>
+              <p className="subtitle-content">{localLiveCaption}</p>
+            </div>
+          )}
+
           {/* Swap button: bottom-left of PiP overlay */}
           <button
             className="pip-swap-btn"
@@ -760,6 +890,7 @@ export function VideoCall() {
             <ArrowLeftRight size={14} />
           </button>
         </div>
+
 
         {status === 'Connected' && !commMode && (
           <div className="mode-selection-modal-overlay">
