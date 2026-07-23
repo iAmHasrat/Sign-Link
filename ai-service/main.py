@@ -278,68 +278,84 @@ COUNT_WORDS = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE"]
 
 def classify_gesture_rules(pose: list, left_hand: list, right_hand: list) -> tuple[str, float]:
     """
-    Classify the current frame's landmarks into a gesture word.
-    Returns (gesture_word, confidence) where confidence is 1.0 for all rules
-    (rules are deterministic).  Returns ("", 0.0) if no gesture detected.
+    Map current-frame MediaPipe landmarks to a gesture gloss word.
+
+    PRIORITY (first match wins):
+      1  THANK_YOU  — both wrists < 0.18 apart (namaste / hands together)
+      2  STOP       — both hands open, wrists 0.18–0.55 apart
+      3  HOW        — both hands present + z-depth diff > 0.05, not both open
+      4  HELLO      — right hand open, ANY wrist height (always hello/wave)
+      5  LOVE       — ILY sign on either hand
+      6  PEACE      — right hand only: index + middle up (✌)
+      7  POINT      — right hand index only up (YOU or ME — LLM decides)
+      8  GOOD       — right thumbs up
+      9  BAD        — right thumbs down
+      10 ONE–FIVE   — left hand ONLY, 1–5 non-thumb fingers (right = absent/fist)
+
+    Returns ("", 0.0) when nothing matches.
     """
     has_left  = bool(left_hand)
     has_right = bool(right_hand)
 
-    # ── NAMASTE / THANK_YOU: both hands present and wrists very close ─────────
+    # ── 1. THANK_YOU / NAMASTE ────────────────────────────────────────────────
     if has_left and has_right:
-        lw_x, lw_y = _wrist_x(left_hand),  _wrist_y(left_hand)
-        rw_x, rw_y = _wrist_x(right_hand), _wrist_y(right_hand)
-        dist = ((lw_x - rw_x) ** 2 + (lw_y - rw_y) ** 2) ** 0.5
-        if dist < 0.18:
+        d = _wrist_dist(left_hand, right_hand)
+        if d < 0.18:
             return ("THANK_YOU", 1.0)
 
-    # ── HELLO / SALUTE: open flat hand raised above midline ───────────────────
-    if has_right and _open_hand(right_hand):
-        if _wrist_y(right_hand) < 0.42:
-            return ("HELLO", 1.0)
-    if has_left and _open_hand(left_hand):
-        if _wrist_y(left_hand) < 0.42:
-            return ("HELLO", 1.0)
+    # ── 2. STOP — BOTH hands open palm ───────────────────────────────────────
+    if has_left and has_right and _open_hand(left_hand) and _open_hand(right_hand):
+        d = _wrist_dist(left_hand, right_hand)
+        if 0.18 <= d <= 0.55:
+            return ("STOP", 1.0)
 
-    # ── LOVE (ILY sign) ───────────────────────────────────────────────────────
+    # ── 3. HOW — one hand in front of the other (z-depth) ────────────────────
+    if has_left and has_right:
+        if abs(_wrist_z(left_hand) - _wrist_z(right_hand)) > 0.05:
+            # Guard: don't fire HOW when both hands are fully open (would be STOP)
+            if not (_open_hand(left_hand) and _open_hand(right_hand)):
+                return ("HOW", 0.90)
+
+    # ── 4. HELLO — right hand open at ANY height ─────────────────────────────
+    if has_right and _open_hand(right_hand):
+        return ("HELLO", 1.0)
+
+    # ── 5. LOVE (ILY) — either hand ──────────────────────────────────────────
     if has_right and _love_sign(right_hand):
         return ("LOVE", 1.0)
     if has_left and _love_sign(left_hand):
         return ("LOVE", 1.0)
 
-    # ── PEACE / GOODBYE ───────────────────────────────────────────────────────
+    # ── 6. PEACE — right hand ONLY (left ✌ = counting TWO) ──────────────────
     if has_right and _peace_sign(right_hand):
         return ("PEACE", 1.0)
-    if has_left and _peace_sign(left_hand):
-        return ("PEACE", 1.0)
 
-    # ── GOOD: right thumbs up ─────────────────────────────────────────────────
+    # ── 7. POINT — right index finger only ───────────────────────────────────
+    if has_right and _point_sign(right_hand):
+        return ("POINT", 1.0)
+
+    # ── 8. GOOD — right thumbs up ────────────────────────────────────────────
     if has_right and _thumb_up(right_hand):
         return ("GOOD", 1.0)
 
-    # ── BAD: right thumbs down ────────────────────────────────────────────────
+    # ── 9. BAD — right thumbs down ───────────────────────────────────────────
     if has_right and _thumb_down(right_hand):
         return ("BAD", 1.0)
 
-    # ── STOP: open hand facing camera at chest level ──────────────────────────
-    if has_right and _open_hand(right_hand) and _wrist_y(right_hand) > 0.42:
-        return ("STOP", 1.0)
-
-    # ── COUNTING: total extended fingers (both hands combined) ────────────────
-    NUMBER_WORDS = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE",
-                    "SIX", "SEVEN", "EIGHT", "NINE", "TEN"]
-    total_fingers = count_extended_fingers(right_hand) + count_extended_fingers(left_hand)
-    # Exclude all-open-hand case (already caught by HELLO/STOP above)
-    if 1 <= total_fingers <= 10:
-        # Only emit counting if neither hand is in a special shape
-        right_special = (has_right and (_thumb_up(right_hand) or _thumb_down(right_hand)
-                                        or _love_sign(right_hand) or _peace_sign(right_hand)))
-        left_special  = (has_left  and (_thumb_up(left_hand)  or _thumb_down(left_hand)
-                                        or _love_sign(left_hand)  or _peace_sign(left_hand)))
-        if not right_special and not left_special:
-            return (NUMBER_WORDS[total_fingers], 0.90)
+    # ── 10. COUNTING — LEFT HAND ONLY, 1–5 non-thumb fingers ─────────────────
+    #   Right hand must be ABSENT or show a closed fist (0 non-thumb fingers up)
+    #   Left hand must NOT be in a special shape (open, ILY, thumb-up/down)
+    if has_left:
+        right_is_fist = (not has_right) or (count_non_thumb_fingers(right_hand) == 0)
+        left_special  = (_open_hand(left_hand) or _love_sign(left_hand)
+                         or _thumb_up(left_hand) or _thumb_down(left_hand))
+        if right_is_fist and not left_special:
+            n = count_non_thumb_fingers(left_hand)
+            if 1 <= n <= 5:
+                return (COUNT_WORDS[n], 0.90)
 
     return ("", 0.0)
+
 
 def decode_image(data_url: str) -> np.ndarray:
     try:
