@@ -2,13 +2,15 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const required = ['JWT_SECRET', 'DB_HOST', 'DB_USER', 'DB_NAME'];
+// Only JWT_SECRET is truly required; DB vars are no longer used (JSON store)
+const required = ['JWT_SECRET'];
 
 for (const key of required) {
   if (!process.env[key]) {
-    console.warn(`[config] Missing environment variable: ${key}`);
+    console.warn(`[config] Missing environment variable: ${key} — using insecure default`);
   }
 }
+
 
 const defaultFrontendUrls = [
   'http://localhost:5173',

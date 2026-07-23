@@ -15,35 +15,34 @@ function getSavedUser() {
   }
 }
 
+const mockUser = {
+  id: 999,
+  full_name: 'Developer Guest',
+  email: 'dev@signlink.org',
+  role: 'Developer'
+};
+const mockToken = 'mock-developer-jwt-token';
+
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(storage.get('sign-link-token'));
-  const [user, setUser] = useState(getSavedUser);
-  const [loading, setLoading] = useState(Boolean(token));
+  // Ensure mock values are in storage on startup for Axios interceptors
+  if (!storage.get('sign-link-token')) {
+    storage.set('sign-link-token', mockToken);
+    storage.set('sign-link-user', JSON.stringify(mockUser));
+  }
+
+  const [token, setToken] = useState(() => storage.get('sign-link-token') || mockToken);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(storage.get('sign-link-user')) || mockUser;
+    } catch {
+      return mockUser;
+    }
+  });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    async function refresh() {
-      if (!token) return setLoading(false);
-      try {
-        // If it's a local developer mock token, bypass the server check
-        if (token === 'mock-developer-jwt-token') {
-          setLoading(false);
-          return;
-        }
-        const { data } = await api.get('/auth/me');
-        setUser(data.user);
-        storage.set('sign-link-user', JSON.stringify(data.user));
-        getSocket(token);
-      } catch {
-        storage.remove('sign-link-token');
-        storage.remove('sign-link-user');
-        disconnectSocket();
-        setToken(null);
-        setUser(null);
-      } finally {
-        setLoading(false);
-      }
-    }
-    refresh();
+    // Disable server-side session refresh to bypass database
+    setLoading(false);
   }, [token]);
 
   const value = useMemo(
@@ -51,54 +50,42 @@ export function AuthProvider({ children }) {
       token,
       user,
       loading,
-      socket: token && token !== 'mock-developer-jwt-token' ? getSocket(token) : null,
+      socket: null,
       async login(payload) {
-        try {
-          const { data } = await api.post('/auth/login', payload);
-          storage.set('sign-link-token', data.token);
-          storage.set('sign-link-user', JSON.stringify(data.user));
-          setToken(data.token);
-          setUser(data.user);
-        } catch (error) {
-          console.warn('[Auth] Node database down. Logging in with mock developer profile.', error);
-          const mockUser = {
-            user_id: 999,
-            full_name: 'Developer Mode',
-            username: 'developer',
-            email: payload.email || 'developer@signlink.dev',
-            role: 'Deaf',
-            preferred_language: 'en'
-          };
-          const mockToken = 'mock-developer-jwt-token';
-          storage.set('sign-link-token', mockToken);
-          storage.set('sign-link-user', JSON.stringify(mockUser));
-          setToken(mockToken);
-          setUser(mockUser);
-        }
+        const email = payload.email || 'dev@signlink.org';
+        const name = email.split('@')[0];
+        const isB = name.toLowerCase().includes('b');
+        const customUser = {
+          id: isB ? 888 : 999,
+          full_name: isB ? 'Developer B' : 'Developer A',
+          email: email,
+          role: 'Developer',
+          username: isB ? 'dev_b' : 'dev_a'
+        };
+        const customToken = isB ? 'mock-token-b' : 'mock-token-a';
+
+        storage.set('sign-link-token', customToken);
+        storage.set('sign-link-user', JSON.stringify(customUser));
+        setToken(customToken);
+        setUser(customUser);
       },
       async register(payload) {
-        try {
-          const { data } = await api.post('/auth/register', payload);
-          storage.set('sign-link-token', data.token);
-          storage.set('sign-link-user', JSON.stringify(data.user));
-          setToken(data.token);
-          setUser(data.user);
-        } catch (error) {
-          console.warn('[Auth] Node database down. Registering with mock developer profile.', error);
-          const mockUser = {
-            user_id: 999,
-            full_name: 'Developer Mode',
-            username: 'developer',
-            email: payload.email || 'developer@signlink.dev',
-            role: 'Deaf',
-            preferred_language: 'en'
-          };
-          const mockToken = 'mock-developer-jwt-token';
-          storage.set('sign-link-token', mockToken);
-          storage.set('sign-link-user', JSON.stringify(mockUser));
-          setToken(mockToken);
-          setUser(mockUser);
-        }
+        const email = payload.email || 'dev@signlink.org';
+        const name = email.split('@')[0];
+        const isB = name.toLowerCase().includes('b');
+        const customUser = {
+          id: isB ? 888 : 999,
+          full_name: isB ? 'Developer B' : 'Developer A',
+          email: email,
+          role: 'Developer',
+          username: isB ? 'dev_b' : 'dev_a'
+        };
+        const customToken = isB ? 'mock-token-b' : 'mock-token-a';
+
+        storage.set('sign-link-token', customToken);
+        storage.set('sign-link-user', JSON.stringify(customUser));
+        setToken(customToken);
+        setUser(customUser);
       },
       async updateUser(nextUser) {
         setUser(nextUser);
@@ -107,7 +94,6 @@ export function AuthProvider({ children }) {
       logout() {
         storage.remove('sign-link-token');
         storage.remove('sign-link-user');
-        disconnectSocket();
         setToken(null);
         setUser(null);
       }
@@ -117,5 +103,7 @@ export function AuthProvider({ children }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+
+
 
 export const useAuth = () => useContext(AuthContext);

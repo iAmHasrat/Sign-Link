@@ -10,10 +10,12 @@ function authResponse(user) {
 export const register = asyncHandler(async (req, res) => {
   const { fullName, username, email, password, role, preferredLanguage } = req.body;
 
-  if (await findUserByEmail(email)) {
+  const existingEmail = await findUserByEmail(email);
+  if (existingEmail) {
     return res.status(409).json({ message: 'Email is already registered' });
   }
-  if (await findUserByUsername(username)) {
+  const existingUsername = await findUserByUsername(username);
+  if (existingUsername) {
     return res.status(409).json({ message: 'Username is already taken' });
   }
 
@@ -24,13 +26,21 @@ export const register = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  const userWithPassword = await findUserByEmail(email);
 
-  if (!userWithPassword || !(await bcrypt.compare(password, userWithPassword.password_hash))) {
+  // findUserByEmail returns the full record including password_hash
+  const { getUsers } = await import('../config/db.js');
+  const userWithHash = getUsers().find(u => u.email.toLowerCase() === email?.toLowerCase());
+
+  if (!userWithHash) {
     return res.status(401).json({ message: 'Invalid email or password' });
   }
 
-  const user = await findUserById(userWithPassword.user_id);
+  const match = await bcrypt.compare(password, userWithHash.password_hash);
+  if (!match) {
+    return res.status(401).json({ message: 'Invalid email or password' });
+  }
+
+  const user = await findUserById(userWithHash.user_id);
   return res.json(authResponse(user));
 });
 

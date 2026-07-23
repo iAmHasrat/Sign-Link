@@ -4,13 +4,13 @@
   "login": "Login",
   "register": "Register",
   "dashboard": "Dashboard",
+  "translator": "ISL Translator",
   "search": "Search Users",
   "chat": "Chat",
   "videoCall": "Video Call",
   "history": "Call History",
   "profile": "Profile",
   "settings": "Settings",
-  "translation": "Sign Translation",
   "logout": "Logout",
   "email": "Email",
   "password": "Password",
@@ -27,5 +27,10 @@
   "reject": "Reject",
   "end": "End",
   "save": "Save",
-  "darkMode": "Dark Mode"
+  "darkMode": "Dark Mode",
+  "translationComplete": "Translation complete",
+  "startTranslating": "Start Translating",
+  "disableCamera": "Disable Camera",
+  "translationResult": "Translation Result",
+  "errorResolvingTranslation": "Error resolving translation."
 }

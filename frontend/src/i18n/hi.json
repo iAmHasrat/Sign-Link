@@ -4,13 +4,13 @@
   "login": "लॉगिन",
   "register": "रजिस्टर",
   "dashboard": "डैशबोर्ड",
+  "translator": "आईएसएल अनुवादक",
   "search": "यूजर खोजें",
   "chat": "चैट",
   "videoCall": "वीडियो कॉल",
   "history": "कॉल इतिहास",
   "profile": "प्रोफाइल",
   "settings": "सेटिंग्स",
-  "translation": "संकेत अनुवाद",
   "logout": "लॉगआउट",
   "email": "ईमेल",
   "password": "पासवर्ड",
@@ -27,5 +27,10 @@
   "reject": "अस्वीकार",
   "end": "समाप्त",
   "save": "सेव",
-  "darkMode": "डार्क मोड"
+  "darkMode": "डार्क मोड",
+  "translationComplete": "अनुवाद पूरा हुआ",
+  "startTranslating": "अनुवाद शुरू करें",
+  "disableCamera": "कैमरा बंद करें",
+  "translationResult": "अनुवाद परिणाम",
+  "errorResolvingTranslation": "अनुवाद हल करने में त्रुटि।"
 }

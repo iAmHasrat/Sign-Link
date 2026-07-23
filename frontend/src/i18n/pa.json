@@ -4,13 +4,13 @@
   "login": "ਲਾਗਇਨ",
   "register": "ਰਜਿਸਟਰ",
   "dashboard": "ਡੈਸ਼ਬੋਰਡ",
+  "translator": "ਆਈਐਸਐਲ ਅਨੁਵਾਦਕ",
   "search": "ਯੂਜ਼ਰ ਲੱਭੋ",
   "chat": "ਚੈਟ",
   "videoCall": "ਵੀਡੀਓ ਕਾਲ",
   "history": "ਕਾਲ ਇਤਿਹਾਸ",
   "profile": "ਪ੍ਰੋਫਾਈਲ",
   "settings": "ਸੈਟਿੰਗਾਂ",
-  "translation": "ਸੰਕੇਤ ਅਨੁਵਾਦ",
   "logout": "ਲਾਗਆਉਟ",
   "email": "ਈਮੇਲ",
   "password": "ਪਾਸਵਰਡ",
@@ -27,5 +27,10 @@
   "reject": "ਰੱਦ ਕਰੋ",
   "end": "ਖਤਮ",
   "save": "ਸੇਵ",
-  "darkMode": "ਡਾਰਕ ਮੋਡ"
+  "darkMode": "ਡਾਰਕ ਮੋਡ",
+  "translationComplete": "ਅਨੁਵਾਦ ਪੂਰਾ ਹੋਇਆ",
+  "startTranslating": "ਅਨੁਵਾਦ ਸ਼ੁਰੂ ਕਰੋ",
+  "disableCamera": "ਕੈਮਰਾ ਬੰਦ ਕਰੋ",
+  "translationResult": "ਅਨੁਵਾਦ ਨਤੀਜਾ",
+  "errorResolvingTranslation": "ਅਨੁਵਾਦ ਕਰਨ ਵਿੱਚ ਗਲਤੀ।"
 }

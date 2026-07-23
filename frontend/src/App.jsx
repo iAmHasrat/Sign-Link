@@ -12,7 +12,7 @@ import { Register } from './pages/Register.jsx';
 import { Settings } from './pages/Settings.jsx';
 import { UserSearch } from './pages/UserSearch.jsx';
 import { VideoCall } from './pages/VideoCall.jsx';
-import { Translation } from './pages/Translation.jsx';
+import { Translator } from './pages/Translator.jsx';
 
 export function App() {
   const { user } = useAuth();
@@ -28,7 +28,7 @@ export function App() {
           <Route path="/search" element={<UserSearch />} />
           <Route path="/chat/:peerId?" element={<Chat />} />
           <Route path="/call/:peerId?" element={<VideoCall />} />
-          <Route path="/translation" element={<Translation />} />
+          <Route path="/translator" element={<Translator />} />
           <Route path="/history" element={<CallHistory />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />

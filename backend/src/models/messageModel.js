@@ -1,48 +1,60 @@
-import { pool } from '../config/db.js';
+// messageModel.js — JSON-backed message store
+
+import { getMessages, saveDb } from '../config/db.js';
+import { findUserById } from './userModel.js';
+
+let _nextId = null;
+
+function nextId() {
+  if (_nextId === null) {
+    const msgs = getMessages();
+    _nextId = msgs.length > 0 ? Math.max(...msgs.map(m => m.message_id)) + 1 : 1;
+  }
+  return _nextId++;
+}
 
 export async function createMessage(senderId, receiverId, messageText) {
-  const [result] = await pool.execute(
-    'INSERT INTO messages (sender_id, receiver_id, message_text) VALUES (?, ?, ?)',
-    [senderId, receiverId, messageText]
-  );
-  const [rows] = await pool.execute(
-    `SELECT m.*, s.username AS sender_username, r.username AS receiver_username
-     FROM messages m
-     JOIN users s ON s.user_id = m.sender_id
-     JOIN users r ON r.user_id = m.receiver_id
-     WHERE m.message_id = ?`,
-    [result.insertId]
-  );
-  return rows[0];
+  const messages = getMessages();
+  const sender   = await findUserById(senderId);
+  const receiver = await findUserById(receiverId);
+
+  const msg = {
+    message_id: nextId(),
+    sender_id: senderId,
+    receiver_id: receiverId,
+    message_text: messageText,
+    created_at: new Date().toISOString(),
+    seen_at: null,
+    sender_username:   sender?.username   ?? String(senderId),
+    receiver_username: receiver?.username ?? String(receiverId)
+  };
+
+  messages.push(msg);
+  saveDb();
+  return msg;
 }
 
 export async function listConversation(userId, peerId) {
-  const [rows] = await pool.execute(
-    `SELECT *
-     FROM messages
-     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-     ORDER BY created_at ASC
-     LIMIT 200`,
-    [userId, peerId, peerId, userId]
-  );
-  return rows;
+  return getMessages()
+    .filter(m =>
+      (String(m.sender_id) === String(userId)   && String(m.receiver_id) === String(peerId)) ||
+      (String(m.sender_id) === String(peerId)   && String(m.receiver_id) === String(userId))
+    )
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 export async function markConversationSeen(userId, peerId) {
-  await pool.execute(
-    `UPDATE messages
-     SET seen_at = COALESCE(seen_at, CURRENT_TIMESTAMP)
-     WHERE sender_id = ? AND receiver_id = ? AND seen_at IS NULL`,
-    [peerId, userId]
-  );
-
-  const [rows] = await pool.execute(
-    `SELECT message_id, sender_id, receiver_id, seen_at
-     FROM messages
-     WHERE sender_id = ? AND receiver_id = ? AND seen_at IS NOT NULL
-     ORDER BY seen_at DESC
-     LIMIT 200`,
-    [peerId, userId]
-  );
-  return rows;
+  const messages = getMessages();
+  const seenAt = new Date().toISOString();
+  const updated = [];
+  messages.forEach(m => {
+    if (String(m.sender_id) === String(peerId) &&
+        String(m.receiver_id) === String(userId) &&
+        !m.seen_at) {
+      m.seen_at = seenAt;
+      updated.push(m);
+    }
+  });
+  if (updated.length) saveDb();
+  return updated;
 }

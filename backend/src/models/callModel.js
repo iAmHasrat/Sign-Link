@@ -1,39 +1,46 @@
-import { pool } from '../config/db.js';
+// callModel.js — JSON-backed call store
+
+import { getCalls, saveDb } from '../config/db.js';
+
+let _nextId = null;
+
+function nextId() {
+  if (_nextId === null) {
+    const calls = getCalls();
+    _nextId = calls.length > 0 ? Math.max(...calls.map(c => c.call_id)) + 1 : 1;
+  }
+  return _nextId++;
+}
 
 export async function createCall(callerId, receiverId, status = 'started') {
-  const [result] = await pool.execute(
-    'INSERT INTO calls (caller_id, receiver_id, call_status) VALUES (?, ?, ?)',
-    [callerId, receiverId, status]
-  );
-  await pool.execute('INSERT INTO call_history (call_id, caller_id, receiver_id) VALUES (?, ?, ?)', [
-    result.insertId,
-    callerId,
-    receiverId
-  ]);
-  return result.insertId;
+  const calls = getCalls();
+  const call = {
+    call_id: nextId(),
+    caller_id: callerId,
+    receiver_id: receiverId,
+    status,
+    started_at: new Date().toISOString(),
+    ended_at: null
+  };
+  calls.push(call);
+  saveDb();
+  console.log('[JSON DB] createCall', { callId: call.call_id, callerId, receiverId });
+  return call.call_id;
 }
 
 export async function finishCall(callId, status = 'completed') {
-  await pool.execute(
-    `UPDATE calls
-     SET end_time = CURRENT_TIMESTAMP,
-         duration_seconds = TIMESTAMPDIFF(SECOND, start_time, CURRENT_TIMESTAMP),
-         call_status = ?
-     WHERE call_id = ?`,
-    [status, callId]
-  );
+  const calls = getCalls();
+  const call = calls.find(c => String(c.call_id) === String(callId));
+  if (call) {
+    call.status = status;
+    call.ended_at = new Date().toISOString();
+    saveDb();
+  }
+  console.log('[JSON DB] finishCall', { callId, status });
 }
 
 export async function listCallHistory(userId) {
-  const [rows] = await pool.execute(
-    `SELECT c.*, caller.full_name AS caller_name, receiver.full_name AS receiver_name
-     FROM calls c
-     JOIN users caller ON caller.user_id = c.caller_id
-     JOIN users receiver ON receiver.user_id = c.receiver_id
-     WHERE c.caller_id = ? OR c.receiver_id = ?
-     ORDER BY c.start_time DESC
-     LIMIT 100`,
-    [userId, userId]
-  );
-  return rows;
+  return getCalls()
+    .filter(c => String(c.caller_id) === String(userId) || String(c.receiver_id) === String(userId))
+    .sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
 }
